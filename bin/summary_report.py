@@ -50,20 +50,39 @@ def find_gene(gene_dict, gene_name):
     return None
 
 
-def parse_assembly_stats(filepath):
+def parse_mash_tophit(filepath):
     with open(filepath) as f:
-        fields = f.read().strip().split(',')
+        f.readline()  # header
+        fields = f.readline().strip().split('\t')
     return {
-        'genus':          fields[0],
-        'species':        fields[1],
-        'mash_distance':  fields[2],
-        'accession':      fields[3],
-        'num_contigs':    fields[4],
-        'longest_contig': fields[5],
-        'n50':            fields[6],
-        'l50':            fields[7],
-        'total_length':   fields[8],
-        'gc_content':     fields[9],
+        'genus':         fields[0] if len(fields) > 0 else NO_DATA,
+        'species':       fields[1] if len(fields) > 1 else NO_DATA,
+        'mash_distance': fields[2] if len(fields) > 2 else NO_DATA,
+        'accession':     fields[3] if len(fields) > 3 else NO_DATA,
+    }
+
+
+def parse_quast_report(filepath):
+    want = {
+        '# contigs':      'NA',
+        'Largest contig': 'NA',
+        'N50':            'NA',
+        'L50':            'NA',
+        'Total length':   'NA',
+        'GC (%)':         'NA',
+    }
+    with open(filepath) as fh:
+        for row in fh:
+            parts = row.rstrip('\n').split('\t')
+            if len(parts) >= 2 and parts[0] in want:
+                want[parts[0]] = parts[1]
+    return {
+        'num_contigs':    want['# contigs'],
+        'longest_contig': want['Largest contig'],
+        'n50':            want['N50'],
+        'l50':            want['L50'],
+        'total_length':   want['Total length'],
+        'gc_content':     want['GC (%)'],
     }
 
 
@@ -825,12 +844,12 @@ def main():
     hinfluenzae_txt = args.hinfluenzae_txt
 
     samples = sorted(
-        f.replace('_assembly_stats.txt', '')
-        for f in glob.glob('*_assembly_stats.txt')
+        f.replace('_mash_tophit.tsv', '')
+        for f in glob.glob('*_mash_tophit.tsv')
     )
 
     if not samples:
-        print('summary_report.py: no *_assembly_stats.txt files found.', file=sys.stderr)
+        print('summary_report.py: no *_mash_tophit.tsv files found.', file=sys.stderr)
         sys.exit(1)
 
     rows_std = []
@@ -843,7 +862,8 @@ def main():
 
         amr_by_sample[sid] = parse_amrfinder(f'{sid}_amrfinderplus_report.tsv')
 
-        asm  = parse_assembly_stats(f'{sid}_assembly_stats.txt')
+        asm  = {**parse_mash_tophit(f'{sid}_mash_tophit.tsv'),
+                **parse_quast_report(f'{sid}_quast_report.tsv')}
         rm   = parse_read_metrics(f'{sid}_readMetrics.txt')
         cds  = parse_prokka_txt(f'{sid}.txt')
         mlst = parse_mlst(f'{sid}.mlst', neisseria_txt, hinfluenzae_txt)
@@ -891,25 +911,12 @@ def main():
         if scheme in ('neisseria', 'hinfluenzae'):
             serotype = pmga['prediction'] or NO_DATA
         else:
-            # Species-specific serotype from published output dirs
-            serotype = NO_DATA
-            for getter in [
-                lambda: get_ecoli_serotype(sample_dir, sid),
-                lambda: get_klebsiella_serotype(sample_dir, sid),
-                lambda: get_legionella_serotype(sample_dir, sid),
-                lambda: get_salmonella_serotype(sample_dir, sid),
-                lambda: get_gas_serotype(sample_dir, sid),
-                lambda: get_shigella_serotype(sample_dir, sid),
-                lambda: get_pneumococcal_serotype(sample_dir, sid),
-                lambda: get_acinetobacter_serotype(sample_dir, sid),
-                lambda: get_vibrio_serotype(sample_dir, sid),
-                lambda: get_pseudomonas_serotype(sample_dir, sid),
-                lambda: get_listeria_serotype(sample_dir, sid),
-            ]:
-                result = getter()
-                if result is not None:
-                    serotype = result
-                    break
+            sero_path = f'{sid}_serotype.tsv'
+            if os.path.isfile(sero_path):
+                with open(sero_path) as f:
+                    serotype = f.readline().strip() or NO_DATA
+            else:
+                serotype = NO_DATA
 
         species_id_qc = compute_id_qc(sk, SP_MIN_ANI, SP_MIN_AF, SP_REVIEW_ANI)
         contaminated = contamination_flag not in ('None', NO_DATA)

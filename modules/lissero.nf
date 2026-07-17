@@ -1,15 +1,15 @@
 process lissero {
     tag "${meta.id}"
-    publishDir { "${params.output}/${meta.id}/lissero" }, mode: 'copy'
+    publishDir { "${params.output}/${meta.id}" }, mode: 'copy'
 
     input:
         tuple val(meta), path(assembly)
     output:
-        path("lissero_output.txt")
-        val meta, emit: done
+        tuple val(meta), path("lissero"), emit: results
 
     script:
     """
-    lissero ${assembly} > lissero_output.txt
+    mkdir lissero
+    lissero ${assembly} > lissero/lissero_output.txt
     """
 }

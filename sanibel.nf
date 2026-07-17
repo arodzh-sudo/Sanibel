@@ -7,8 +7,6 @@
   Email: bphl-sebioinformatics@flhealth.gov 
 */
 
-nextflow.enable.dsl = 2
-
 include { fastqc }                from './modules/fastqc.nf'
 include { trimmomatic }           from './modules/trimmomatic.nf'
 include { bbtools_adapters }      from './modules/bbtools.nf'
@@ -28,9 +26,11 @@ include { mlst }                  from './modules/mlst.nf'
 include { pmga }                  from './modules/pmga.nf'
 include { download_16s_db }       from './modules/blast_16s.nf'
 include { blast_16s }             from './modules/blast_16s.nf'
+include { download_mlst_tables }  from './modules/download_mlst_tables.nf'
 include { aggregate_species_id }  from './modules/aggregate_species_id.nf'
 include { build_candidates }      from './modules/build_candidates.nf'
-include { candidate_references }  from './modules/candidate_references.nf'
+include { download_one_candidate } from './modules/download_one_candidate.nf'
+include { collect_references }    from './modules/collect_references.nf'
 include { skani }                 from './modules/skani.nf'
 include { bmgap2_amr }            from './modules/bmgap2_amr.nf'
 include { bmgap2_locusextractor } from './modules/bmgap2_locusextractor.nf'
@@ -47,6 +47,7 @@ include { pasty }                 from './modules/pasty.nf'
 include { kaptive as kaptive_ab } from './modules/kaptive.nf'
 include { kaptive as kaptive_vp } from './modules/kaptive.nf'
 include { lissero }               from './modules/lissero.nf'
+include { serotype }              from './modules/serotype.nf'
 include { summary_report }        from './modules/summary_report.nf'
 
 def rebind(ch, metaCh) {
@@ -78,29 +79,17 @@ workflow {
         [ meta, files ]
     }
 
-    // MLST CC reference tables
-    def mlstTablesDir = "${projectDir}/db/mlst_tables"
-    [
-        [ file("${mlstTablesDir}/neisseria.txt"),
-          "https://raw.githubusercontent.com/tseemann/mlst/master/db/pubmlst/neisseria/neisseria.txt" ],
-        [ file("${mlstTablesDir}/hinfluenzae.txt"),
-          "https://raw.githubusercontent.com/tseemann/mlst/master/db/pubmlst/hinfluenzae/hinfluenzae.txt" ]
-    ].each { dst, src ->
-        if ( !dst.exists() ) {
-            log.info "Downloading ${dst.name} from PubMLST..."
-            dst.text = src.toURL().text
-        }
-    }
-
-    ch_neisseria_txt   = channel.value(file("${mlstTablesDir}/neisseria.txt",   checkIfExists: true))
-    ch_hinfluenzae_txt = channel.value(file("${mlstTablesDir}/hinfluenzae.txt", checkIfExists: true))
+    // MLST CC reference tables (downloaded once, cached via storeDir)
+    ch_mlst_tables     = download_mlst_tables()
+    ch_neisseria_txt   = ch_mlst_tables.neisseria.first()
+    ch_hinfluenzae_txt = ch_mlst_tables.hinfluenzae.first()
     ch_mlst_schemes    = channel.value(file("${projectDir}/assets/mlst_schemes.tsv", checkIfExists: true))
 
     // Read as a map, not a staged file
     kleborate_presets = file("${projectDir}/assets/kleborate_presets.tsv", checkIfExists: true)
         .readLines()
         .findAll { line -> line.trim() && !line.startsWith('#') }
-        .collectEntries { line -> def (sp, p) = line.split('\t'); [(sp): p] }
+        .collectEntries { line -> def parts = line.split('\t'); [(parts[0]): parts[1]] }
 
     // QC & read preprocessing
     ch_fastqc  = fastqc(ch_reads)
@@ -125,32 +114,24 @@ workflow {
     ch_kraken   = kraken(ch_clean.reads)
     ch_quast    = quast(ch_assembly.assembly)
 
-    // Assembly statistics
-    ch_parse_assembly = parse_assembly(
-        ch_mash.distances
-            .join(ch_quast.report, by: 0)
-    )
+    // Mash top-hit (genus/species/distance/accession)
+    ch_tophit = parse_assembly(ch_mash.distances)
 
-    // Meta + assembly stats channel
-    ch_stats = ch_parse_assembly.map { meta, stats ->
-        def fields        = stats.text.trim().split(',')
-        def enriched_meta = meta + [
-            mash_genus:   fields[0],
-            mash_species: fields[0] + '_' + fields[1],
-            genome_size:  fields[8].toLong()
-        ]
-        [ enriched_meta, stats ]
-    }
-
-    // Meta channel keyed by sample ID
-    ch_meta_by_id = ch_stats.map { meta, _stats -> [ meta.id, meta ] }
+    // Meta keyed by sample ID, enriched with the mash species for prokka's fallback
+    ch_meta_by_id = ch_tophit
+        .splitCsv(header: true, sep: '\t', elem: 1)
+        .map { meta, row -> [ meta.id, meta + [ mash_species: row.genus + '_' + row.species ] ] }
 
     // Rebind clean reads and assembly with enriched meta
     ch_clean_enriched    = rebind(ch_clean.reads,       ch_meta_by_id)
     ch_assembly_enriched = rebind(ch_assembly.assembly, ch_meta_by_id)
 
-    // Read metrics
-    ch_readssum = readssum(ch_clean_enriched)
+    // Read metrics (genome size computed from the assembly inside the process)
+    ch_readssum = readssum(
+        ch_clean_enriched.map { meta, reads -> [ meta.id, meta, reads ] }
+            .join(ch_assembly_enriched.map { meta, asm -> [ meta.id, asm ] })
+            .map { _id, meta, reads, asm -> [ meta, reads, asm ] }
+    )
 
     ch_amrfinder = amrfinder(ch_assembly_enriched)
 
@@ -167,10 +148,11 @@ workflow {
 
     // 2-of-3 species vote (Mash + Kraken2 + 16S BLAST)
     ch_aggregate = aggregate_species_id(
-        ch_stats.map { meta, stats -> [ meta.id, meta, stats ] }
+        ch_tophit.map { meta, t -> [ meta.id, t ] }
+            .join(ch_meta_by_id)
             .join(ch_kraken_by_id)
             .join(ch_blast_by_id)
-            .map { _id, emeta, stats, kreport, blast -> [ emeta, stats, kreport, blast ] }
+            .map { _id, tophit, emeta, kreport, blast -> [ emeta, tophit, kreport, blast ] }
     )
 
     // Build candidate species pool from all tools
@@ -183,8 +165,16 @@ workflow {
             .map  { _id, distances, kreport, blast, emeta -> [ emeta, distances, kreport, blast ] }
     )
 
-    // Download reference genomes per candidate in the pool
-    ch_refs = candidate_references(ch_pool.pool)
+    // Download reference genomes: one task per candidate, then collect per sample
+    ch_candidates = ch_pool.pool
+        .splitCsv(header: true, sep: '\t', elem: 1)
+        .map { meta, row -> [ meta, row.species, row.accession ] }
+    ch_refs = collect_references(
+        download_one_candidate(ch_candidates).fna
+            .map    { meta, fnas -> [ meta.id, meta, fnas ] }
+            .groupTuple(by: 0)
+            .map    { _id, metas, fnas -> [ metas[0], fnas.flatten() ] }
+    )
 
     // Multi-reference ANI confirmation with skani
     ch_skani = skani(
@@ -223,37 +213,48 @@ workflow {
     ch_bmgap2_bmscan = bmgap2_bmscan(ch_bmgap2_le.out)
 
     // Species-specific analyses
-    legsta(ch_assembly_typed.filter      { meta, _a -> meta.species == 'Legionella_pneumophila' })
-    kleborate(
+    ch_legsta = legsta(ch_assembly_typed.filter { meta, _a -> meta.species == 'Legionella_pneumophila' })
+    ch_kleborate = kleborate(
         ch_assembly_typed
             .map    { meta, a  -> [ meta + [kleborate_preset: kleborate_presets[meta.species?.tokenize('_')?.take(2)?.join('_')]], a ] }
             .filter { meta, _a -> meta.kleborate_preset }
     )
-    shigatyper(ch_clean_typed.filter     { meta, _r -> meta.genus   == 'Shigella' })
-    emm_typing(ch_clean_typed.filter     { meta, _r -> meta.species in ['Streptococcus_pyogenes', 'Streptococcus_dysgalactiae'] })
-    seqsero2(ch_clean_typed.filter       { meta, _r -> meta.genus   == 'Salmonella' })
-    serotypefinder(ch_clean_typed.filter { meta, _r -> meta.species == 'Escherichia_coli' })
-    plasmidfinder(ch_clean_enriched)
-    seroba(ch_clean_typed.filter         { meta, _r -> meta.species == 'Streptococcus_pneumoniae' })
-    pasty(ch_assembly_typed.filter       { meta, _a -> meta.species == 'Pseudomonas_aeruginosa' })
-    kaptive_ab(ch_assembly_typed.filter  { meta, _a -> meta.species == 'Acinetobacter_baumannii' }, 'ab')
-    kaptive_vp(ch_assembly_typed.filter  { meta, _a -> meta.species == 'Vibrio_parahaemolyticus' }, 'vp')
-    lissero(ch_assembly_typed.filter     { meta, _a -> meta.species == 'Listeria_monocytogenes' })
+    ch_shigatyper     = shigatyper(ch_clean_typed.filter     { meta, _r -> meta.genus   == 'Shigella' })
+    ch_emm_typing     = emm_typing(ch_clean_typed.filter     { meta, _r -> meta.species in ['Streptococcus_pyogenes', 'Streptococcus_dysgalactiae'] })
+    ch_seqsero2       = seqsero2(ch_clean_typed.filter       { meta, _r -> meta.genus   == 'Salmonella' })
+    ch_serotypefinder = serotypefinder(ch_clean_typed.filter { meta, _r -> meta.species == 'Escherichia_coli' })
+    ch_plasmidfinder  = plasmidfinder(ch_clean_enriched)
+    ch_seroba         = seroba(ch_clean_typed.filter         { meta, _r -> meta.species == 'Streptococcus_pneumoniae' })
+    ch_pasty          = pasty(ch_assembly_typed.filter       { meta, _a -> meta.species == 'Pseudomonas_aeruginosa' })
+    ch_kaptive_ab     = kaptive_ab(ch_assembly_typed.filter  { meta, _a -> meta.species == 'Acinetobacter_baumannii' }, 'ab')
+    ch_kaptive_vp     = kaptive_vp(ch_assembly_typed.filter  { meta, _a -> meta.species == 'Vibrio_parahaemolyticus' }, 'vp')
+    ch_lissero        = lissero(ch_assembly_typed.filter     { meta, _a -> meta.species == 'Listeria_monocytogenes' })
 
-    ch_optional_barrier =
-        legsta.out.done
-            .mix(kleborate.out.done, shigatyper.out.done, emm_typing.out.done,
-                 seqsero2.out.done, serotypefinder.out.done, plasmidfinder.out.done,
-                 seroba.out.done, pasty.out.done, kaptive_ab.out.done, kaptive_vp.out.done,
-                 lissero.out.done,
-                 ch_bmgap2_bmscan.map { meta, _f -> meta })
-            .map { _id -> 1 }
-            .collect()
-            .map { _ids -> true }
+    // Normalize each sample's serotype to a single value (one typing tool per sample)
+    ch_serotype = serotype(
+        ch_legsta.results.map              { meta, d -> [ meta, 'legsta',         d ] }
+            .mix(ch_kleborate.results.map      { meta, d -> [ meta, 'kleborate',      d ] },
+                 ch_shigatyper.results.map     { meta, d -> [ meta, 'shigatyper',     d ] },
+                 ch_emm_typing.results.map     { meta, d -> [ meta, 'emm_typing',     d ] },
+                 ch_seqsero2.results.map       { meta, d -> [ meta, 'seqsero2',       d ] },
+                 ch_serotypefinder.results.map { meta, d -> [ meta, 'serotypefinder', d ] },
+                 ch_seroba.results.map         { meta, d -> [ meta, 'seroba',         d ] },
+                 ch_pasty.results.map          { meta, d -> [ meta, 'pasty',          d ] },
+                 ch_kaptive_ab.results.map     { meta, d -> [ meta, 'kaptive_ab',     d ] },
+                 ch_kaptive_vp.results.map     { meta, d -> [ meta, 'kaptive_vp',     d ] },
+                 ch_lissero.results.map        { meta, d -> [ meta, 'lissero',        d ] })
+    )
+
+    // Barrier only for the bmgap2 side-channel (still writes into the output dir)
+    ch_bmgap2_barrier = ch_bmgap2_bmscan
+        .map { _meta, _f -> 1 }
+        .collect()
+        .map { _ids -> true }
 
     ch_summary = summary_report(
-        ch_optional_barrier,
-        ch_stats.map { _meta, stats -> stats }.collect(),
+        ch_bmgap2_barrier,
+        ch_quast.report.map         { _meta, q    -> q    }.collect(),
+        ch_tophit.map               { _meta, t    -> t    }.collect(),
         ch_readssum.out.map         { _meta, rm   -> rm   }.collect(),
         ch_prokka.cds_txt.map       { _meta, ptxt -> ptxt }.collect(),
         ch_mlst.out.map             { _meta, mlst_file -> mlst_file }.collect(),
@@ -264,7 +265,8 @@ workflow {
         ch_aggregate.out.map        { _meta, f -> f }.collect().ifEmpty([]),
         ch_skani.result.map         { _meta, f -> f }.collect().ifEmpty([]),
         ch_blast_16s.result.map     { _meta, f -> f }.collect().ifEmpty([]),
-        ch_amrfinder.out.map        { _meta, f -> f }.collect().ifEmpty([])
+        ch_amrfinder.out.map        { _meta, f -> f }.collect().ifEmpty([]),
+        ch_serotype.out.map         { _meta, f -> f }.collect().ifEmpty([])
     )
 
     // Run-level interactive MultiQC across all samples

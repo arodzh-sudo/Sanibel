@@ -2,13 +2,12 @@ process parse_assembly {
     tag "${meta.id}"
 
     input:
-        tuple val(meta), path(distances), path(quast_report)
+        tuple val(meta), path(distances)
     output:
-        tuple val(meta), path("${meta.id}_assembly_stats.txt"), emit: out
+        tuple val(meta), path("${meta.id}_mash_tophit.tsv"), emit: tophit
 
     script:
-    def sample = meta.id
     """
-    parse_assembly.py ${distances} ${quast_report} > ${sample}_assembly_stats.txt
+    parse_assembly.py ${distances} > ${meta.id}_mash_tophit.tsv
     """
 }

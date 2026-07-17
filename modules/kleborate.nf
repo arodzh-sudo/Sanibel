@@ -1,15 +1,15 @@
 process kleborate {
     tag "${meta.id}"
-    publishDir { "${params.output}/${meta.id}/kleborate" }, mode: 'copy'
+    publishDir { "${params.output}/${meta.id}" }, mode: 'copy'
 
     input:
         tuple val(meta), path(assembly)
     output:
-        path("kleborate_out/*_output.txt")
-        val meta, emit: done
+        tuple val(meta), path("kleborate"), emit: results
 
     script:
     """
-    kleborate -a ${assembly} -o kleborate_out -p ${meta.kleborate_preset} --trim_headers
+    mkdir kleborate
+    kleborate -a ${assembly} -o kleborate/kleborate_out -p ${meta.kleborate_preset} --trim_headers
     """
 }

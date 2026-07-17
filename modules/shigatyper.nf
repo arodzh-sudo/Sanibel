@@ -1,15 +1,15 @@
 process shigatyper {
     tag "${meta.id}"
-    publishDir { "${params.output}/${meta.id}/shigatyper" }, mode: 'copy'
+    publishDir { "${params.output}/${meta.id}" }, mode: 'copy'
 
     input:
         tuple val(meta), path(reads)
     output:
-        path("shigatyper_output.txt")
-        val meta, emit: done
+        tuple val(meta), path("shigatyper"), emit: results
 
     script:
     """
-    shigatyper --R1 ${reads[0]} --R2 ${reads[1]} > shigatyper_output.txt
+    mkdir shigatyper
+    shigatyper --R1 ${reads[0]} --R2 ${reads[1]} > shigatyper/shigatyper_output.txt
     """
 }

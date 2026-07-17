@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """aggregate_species_id.py - 2-of-3 species vote across Mash, Kraken2, and 16S BLAST.
 
-Usage: aggregate_species_id.py <assembly_stats_csv> <kraken_report> <blast_16s_tsv>
+Usage: aggregate_species_id.py <mash_tophit_tsv> <kraken_report> <blast_16s_tsv>
 
 Output (stdout, TSV):
   genus  species  confidence  evidence  contamination_flag
@@ -23,12 +23,13 @@ from sanibel_taxonomy import (
 
 SP_PIDENT = 98.7
 
-def parse_mash(assembly_stats):
-    with open(assembly_stats) as fh:
+def parse_mash(mash_tophit):
+    with open(mash_tophit) as fh:
+        fh.readline()  # header
         line = fh.readline().strip()
     if not line:
         return None, None
-    fields = line.split(',')
+    fields = line.split('\t')
     genus   = fields[0].strip() if len(fields) > 0 else None
     species = fields[1].strip() if len(fields) > 1 else None
     if not genus or genus == 'Unknown':

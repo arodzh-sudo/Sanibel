@@ -1,15 +1,15 @@
 process plasmidfinder {
     tag "${meta.id}"
-    publishDir { "${params.output}/${meta.id}/plasmidfinder" }, mode: 'copy'
+    publishDir { "${params.output}/${meta.id}" }, mode: 'copy'
 
     input:
         tuple val(meta), path(reads)
     output:
-        path("results_*.json")
-        val meta, emit: done
+        tuple val(meta), path("plasmidfinder"), emit: results
 
     script:
     """
-    python -m plasmidfinder -i ${reads[0]} ${reads[1]} -o ./
+    mkdir plasmidfinder
+    python -m plasmidfinder -i ${reads[0]} ${reads[1]} -o plasmidfinder
     """
 }

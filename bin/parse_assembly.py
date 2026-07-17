@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""
-Parse mash distances and QUAST report into a single CSV line.
+"""parse_assembly.py - Mash top-hit for a sample from its distances file.
 
-Usage: parse_assembly.py <distances_file> <quast_report>
-
-Output (stdout):
-  GENUS,SPECIES,DIST,ACCESSION,CONTIGS,LARGEST,N50,L50,TOTAL,GC
+Usage: parse_assembly.py <distances_file>
+Output (stdout, TSV with header):
+  genus  species  distance  accession
 """
 
 import os
@@ -30,36 +28,10 @@ def parse_mash(distances_file):
     return genus or 'Unknown', species or 'unknown', dist, accession or 'Unknown'
 
 
-def parse_quast(quast_file):
-    want = {
-        '# contigs':      'NA',
-        'Largest contig': 'NA',
-        'N50':            'NA',
-        'L50':            'NA',
-        'Total length':   'NA',
-        'GC (%)':         'NA',
-    }
-    with open(quast_file) as fh:
-        for row in fh:
-            parts = row.rstrip('\n').split('\t')
-            if len(parts) >= 2 and parts[0] in want:
-                want[parts[0]] = parts[1]
-    return (
-        want['# contigs'],
-        want['Largest contig'],
-        want['N50'],
-        want['L50'],
-        want['Total length'],
-        want['GC (%)'],
-    )
-
-
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        sys.exit(f"Usage: {sys.argv[0]} <distances_file> <quast_report>")
+    if len(sys.argv) != 2:
+        sys.exit(f"Usage: {sys.argv[0]} <distances_file>")
 
-    genus, species, dist, accession        = parse_mash(sys.argv[1])
-    contigs, largest, n50, l50, total, gc  = parse_quast(sys.argv[2])
-
-    print(f"{genus},{species},{dist},{accession},"
-          f"{contigs},{largest},{n50},{l50},{total},{gc}")
+    genus, species, dist, accession = parse_mash(sys.argv[1])
+    print('genus\tspecies\tdistance\taccession')
+    print(f"{genus}\t{species}\t{dist}\t{accession}")

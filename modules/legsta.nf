@@ -1,15 +1,15 @@
 process legsta {
     tag "${meta.id}"
-    publishDir { "${params.output}/${meta.id}/legsta" }, mode: 'copy'
+    publishDir { "${params.output}/${meta.id}" }, mode: 'copy'
 
     input:
         tuple val(meta), path(assembly)
     output:
-        path("legsta_output.txt")
-        val meta, emit: done
+        tuple val(meta), path("legsta"), emit: results
 
     script:
     """
-    legsta ${assembly} > legsta_output.txt
+    mkdir legsta
+    legsta ${assembly} > legsta/legsta_output.txt
     """
 }

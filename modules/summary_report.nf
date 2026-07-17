@@ -4,7 +4,8 @@ process summary_report {
 
     input:
         val  barrier
-        path assembly_stats_files
+        path quast_report_files
+        path mash_tophit_files
         path read_metrics_files
         path prokka_txt_files
         path mlst_files
@@ -16,6 +17,7 @@ process summary_report {
         path skani_files
         path blast16s_files
         path amrfinder_files
+        path serotype_files
 
     output:
         path "sum_report.txt",    emit: summary
