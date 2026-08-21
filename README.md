@@ -168,8 +168,8 @@ All results are written to `params.output/<sample_id>/`. Depending on which spec
 |------|---------|------|------------|
 | `sum_report.txt` | All | 29 | ID · species (skani ANI, Mash, Kraken) · 16S top hit · skani ANI/reference · species-ID QC · contamination flag · MLST scheme/ST · serotype · QC metrics (reads, coverage, assembly stats, GC, CDS) · assembly QC |
 | `amr_report.txt` | Samples with detected AMR genes | 5 | ID · carbapenemase family · matched target genes · AMR genes · AMR subclasses |
-| `nm_sum_report.txt` | *N. meningitidis* only | 26 | ID · PMGA serogroup · BMGAP2 AMR alleles/phenotypes · vaccine antigen coverage (4CMenB) |
-| `hi_sum_report.txt` | *H. influenzae* only | 22 | ID · PMGA capsule type · BMGAP2 AMR alleles/phenotypes |
+| `nm_sum_report.txt` | *N. meningitidis* only | 27 | ID · BMGAP2 status · PMGA capsule genogroup · BMGAP2 AMR alleles/phenotypes · vaccine antigens detected |
+| `hi_sum_report.txt` | *H. influenzae* only | 23 | ID · BMGAP2 status · PMGA capsule genotype · BMGAP2 AMR alleles/phenotypes |
 
 Cells holding more than one value use `;` as the separator, and no cell contains a comma. Excel parses these files as comma-delimited when they are dragged into a window, which splits a row at every comma it finds.
 

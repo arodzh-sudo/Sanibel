@@ -41,6 +41,32 @@ def normalize_le_value(val):
     return val
 
 
+def read_bmscan_species(sample_id):
+    bmscan_jsons = glob.glob(f'{sample_id}_species_analysis.json')
+    if not bmscan_jsons:
+        return None
+    try:
+        with open(bmscan_jsons[0]) as f:
+            bmscan = json.load(f)
+        for sample_data in bmscan.values():
+            if 'mash_results' in sample_data:
+                return sample_data['mash_results'].get('species') or None
+    except Exception as e:
+        print(f"Warning: Could not parse BMScan JSON for {sample_id}: {e}", file=sys.stderr)
+    return None
+
+
+def meningitis_organism(skani_species, bmscan_species):
+    """Keyed on species, never the MLST scheme: mlst maps the whole Neisseria genus to 'neisseria'."""
+    for label in (skani_species, bmscan_species):
+        key = (label or '').strip().replace(' ', '_').lower()
+        if key.startswith('neisseria_meningitidis'):
+            return 'neisseria'
+        if key.startswith('haemophilus_influenzae'):
+            return 'hinfluenzae'
+    return None
+
+
 def find_gene(gene_dict, gene_name):
     for value in gene_dict.values():
         if value.get('Gene_name') == gene_name:
@@ -567,7 +593,7 @@ def get_listeria_serotype(sample_dir, sample_id):
 
 # BMGAP2 data parser
 
-def parse_bmgap2(sample_id, scheme, hinfluenzae_txt=None):
+def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
     d = {k: NO_DATA for k in [
         'penA_allele', 'penA_mutations', 'penA_phenotype',
         'gyrA_allele', 'gyrA_mutations', 'gyrA_phenotype',
@@ -577,14 +603,16 @@ def parse_bmgap2(sample_id, scheme, hinfluenzae_txt=None):
         'predicted_resistance',
         'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc',
         'FHbp_variant', 'FHbp_subfamily', 'FHbp_peptide',
-        'NadA_variant', 'NhbA_peptide', 'vaccine_4CMenB_coverage',
+        'NadA_variant', 'NhbA_peptide', 'vaccine_antigens_present',
         'folA_allele', 'folA_phenotype',
         'blaTEM1_status', 'blaROB1_status',
     ]}
+    status = {'amr': 'missing', 'le': 'missing', 'bmscan': 'missing'}
 
     # AMR JSON
-    amr_jsons = glob.glob(f'{sample_id}*amr_data.json')
+    amr_jsons = glob.glob(f'{sample_id}_amr_data.json')
     if amr_jsons:
+        status['amr'] = 'ok'
         try:
             with open(amr_jsons[0]) as f:
                 amr = json.load(f)
@@ -597,7 +625,7 @@ def parse_bmgap2(sample_id, scheme, hinfluenzae_txt=None):
                 d['penA_mutations'] = ';'.join(muts) if muts else 'None'
                 pen_pheno = (amr.get('antimicrobics', {})
                                 .get('Penicillins', {}).get('Penicillin', {}))
-                d['penA_phenotype'] = pen_pheno.get('predicted_phenotype', 'Not detected')
+                d['penA_phenotype'] = pen_pheno.get('predicted_phenotype', NO_DATA)
 
             gyra = find_gene(genes, 'gyrA')
             if gyra:
@@ -624,7 +652,7 @@ def parse_bmgap2(sample_id, scheme, hinfluenzae_txt=None):
                 muts = list(pona.get('known_mutations', {}).keys())
                 d['ponA_phenotype'] = 'Susceptible' if not muts else 'Check'
 
-            if scheme == 'hinfluenzae':
+            if organism == 'hinfluenzae':
                 ftsi = find_gene(genes, 'ftsI')
                 if ftsi:
                     d['penA_allele']    = ftsi.get('allele', 'Not detected')
@@ -652,9 +680,10 @@ def parse_bmgap2(sample_id, scheme, hinfluenzae_txt=None):
                 if blarob:
                     d['blaROB1_status'] = blarob.get('status', 'Not detected')
 
-            d['predicted_resistance'] = amr.get('summary', {}).get('predicted_resistance', 'None')
+            d['predicted_resistance'] = amr.get('summary', {}).get('predicted_resistance', NO_DATA)
 
         except Exception as e:
+            status['amr'] = 'failed'
             print(f"Warning: Could not parse BMGAP2 AMR JSON for {sample_id}: {e}", file=sys.stderr)
 
     # LocusExtractor CSV
@@ -662,6 +691,7 @@ def parse_bmgap2(sample_id, scheme, hinfluenzae_txt=None):
     if le_dirs:
         le_csv = os.path.join(le_dirs[0], 'Results_text', f'molecular_data_{sample_id}.csv')
         if os.path.isfile(le_csv):
+            status['le'] = 'ok'
             try:
                 with open(le_csv) as f:
                     reader = csv.DictReader(f)
@@ -670,7 +700,7 @@ def parse_bmgap2(sample_id, scheme, hinfluenzae_txt=None):
                 prokka_rows = [r for r in all_rows if 'prokka' in r.get('Filename', '')]
                 row = prokka_rows[0] if prokka_rows else (all_rows[0] if all_rows else None)
                 if row is not None:
-                    if scheme == 'hinfluenzae':
+                    if organism == 'hinfluenzae':
                         d['bmgap2_mlst_st'] = row.get('Hi_MLST_ST', '') or NO_DATA
                         hi_st = d['bmgap2_mlst_st']
                         d['bmgap2_mlst_cc'] = NO_DATA
@@ -688,33 +718,25 @@ def parse_bmgap2(sample_id, scheme, hinfluenzae_txt=None):
                     d['NadA_variant']  = normalize_le_value(row.get('NadA_Protein_subvariant_Novartis', ''))
                     d['NhbA_peptide']  = normalize_le_value(row.get('NhbA_Protein_subvariant_Novartis', ''))
 
-                    if scheme == 'hinfluenzae':
-                        d['vaccine_4CMenB_coverage'] = 'Not applicable'
+                    if organism == 'hinfluenzae':
+                        d['vaccine_antigens_present'] = 'Not applicable'
                     else:
-                        has_fhbp = d['FHbp_variant'] not in [NO_DATA, 'Not detected']
-                        has_nada = d['NadA_variant'] not in [NO_DATA, 'Not detected']
-                        has_nhba = d['NhbA_peptide'] not in [NO_DATA, 'Not detected']
-                        if has_fhbp and (has_nada or has_nhba):
-                            d['vaccine_4CMenB_coverage'] = 'Likely'
-                        elif has_fhbp:
-                            d['vaccine_4CMenB_coverage'] = 'Possible'
-                        else:
-                            d['vaccine_4CMenB_coverage'] = 'Unlikely'
+                        # Presence only: no peptide identity and no PorA, so not a coverage prediction.
+                        detected = [name for name, val in (('fHbp', d['FHbp_variant']),
+                                                           ('NHBA', d['NhbA_peptide']),
+                                                           ('NadA', d['NadA_variant']))
+                                    if val not in (NO_DATA, 'Not detected')]
+                        d['vaccine_antigens_present'] = ';'.join(detected) if detected else 'None detected'
             except Exception as e:
+                status['le'] = 'failed'
                 print(f"Warning: Could not parse LocusExtractor CSV for {sample_id}: {e}", file=sys.stderr)
 
-    # BMScan JSON
-    bmscan_jsons = glob.glob(f'{sample_id}_species_analysis.json')
-    if bmscan_jsons:
-        try:
-            with open(bmscan_jsons[0]) as f:
-                bmscan = json.load(f)
-            for sample_data in bmscan.values():
-                if 'mash_results' in sample_data:
-                    d['bmgap2_species'] = sample_data['mash_results'].get('species', '-')
-                    break
-        except Exception as e:
-            print(f"Warning: Could not parse BMScan JSON for {sample_id}: {e}", file=sys.stderr)
+    if bmscan_species:
+        status['bmscan'] = 'ok'
+        d['bmgap2_species'] = bmscan_species
+
+    d['bmgap2_status'] = ('ok' if all(v == 'ok' for v in status.values())
+                          else ';'.join(f'{k}:{v}' for k, v in status.items() if v != 'ok'))
 
     return d
 
@@ -738,20 +760,20 @@ HEADER_AMR = ['sampleID', 'carbapenemase_family', 'amr_target',
               'amr_genes', 'amr_subclass']
 
 HEADER_NM = [
-    'sampleID',
-    'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'nm_serogroup', 'predicted_resistance',
+    'sampleID', 'bmgap2_status',
+    'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'nm_genogroup', 'predicted_resistance',
     'penA_allele', 'penA_mutations', 'penA_phenotype',
     'gyrA_allele', 'gyrA_mutations', 'gyrA_phenotype',
     'parC_allele', 'parC_phenotype',
     'rpoB_allele', 'rpoB_phenotype',
     'ponA_allele', 'ponA_phenotype',
     'FHbp_variant', 'FHbp_subfamily', 'FHbp_peptide',
-    'NadA_variant', 'NhbA_peptide', 'vaccine_4CMenB_coverage',
+    'NadA_variant', 'NhbA_peptide', 'vaccine_antigens_present',
 ]
 
 HEADER_HI = [
-    'sampleID',
-    'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'hi_serotype', 'predicted_resistance',
+    'sampleID', 'bmgap2_status',
+    'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'hi_capsule_genotype', 'predicted_resistance',
     'ftsI_allele', 'ftsI_mutations', 'ftsI_phenotype',
     'gyrA_allele', 'gyrA_mutations', 'gyrA_phenotype',
     'parC_allele', 'parC_phenotype',
@@ -923,11 +945,16 @@ def main():
         else:
             contamination_flag = 'None'
 
-        scheme  = mlst['scheme']
-        pmga_sp = pmga['species'] or NO_DATA
+        scheme   = mlst['scheme']
+        pmga_sp  = pmga['species'] or NO_DATA
+        bmscan_species = read_bmscan_species(sid)
+        organism       = meningitis_organism(skani_ID_val, bmscan_species)
 
-        if scheme in ('neisseria', 'hinfluenzae'):
+        if organism:
             serotype = pmga['prediction'] or NO_DATA
+        elif pmga['prediction']:
+            # PMGA runs on the whole genus, so its call means nothing until the species is confirmed
+            serotype = 'Not confirmed Nm/Hi'
         else:
             # Species-specific serotype from published output dirs
             serotype = NO_DATA
@@ -974,10 +1001,10 @@ def main():
         ]
         rows_std.append(std_row)
 
-        if scheme == 'neisseria':
-            bm = parse_bmgap2(sid, scheme, hinfluenzae_txt)
+        if organism == 'neisseria':
+            bm = parse_bmgap2(sid, organism, bmscan_species, hinfluenzae_txt)
             nm_row = [
-                sid,
+                sid, bm['bmgap2_status'],
                 pmga_sp,
                 bm['bmgap2_species'], bm['bmgap2_mlst_st'], bm['bmgap2_mlst_cc'],
                 pmga['serotype_notes'],
@@ -989,14 +1016,14 @@ def main():
                 bm['rpoB_allele'], bm['rpoB_phenotype'],
                 bm['ponA_allele'], bm['ponA_phenotype'],
                 bm['FHbp_variant'], bm['FHbp_subfamily'], bm['FHbp_peptide'],
-                bm['NadA_variant'], bm['NhbA_peptide'], bm['vaccine_4CMenB_coverage'],
+                bm['NadA_variant'], bm['NhbA_peptide'], bm['vaccine_antigens_present'],
             ]
             rows_nm.append(nm_row)
 
-        elif scheme == 'hinfluenzae':
-            bm = parse_bmgap2(sid, scheme, hinfluenzae_txt)
+        elif organism == 'hinfluenzae':
+            bm = parse_bmgap2(sid, organism, bmscan_species, hinfluenzae_txt)
             hi_row = [
-                sid,
+                sid, bm['bmgap2_status'],
                 pmga_sp,
                 bm['bmgap2_species'], bm['bmgap2_mlst_st'], bm['bmgap2_mlst_cc'],
                 pmga['serotype_notes'],
