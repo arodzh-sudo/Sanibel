@@ -609,8 +609,12 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
     ]}
     status = {'amr': 'missing', 'le': 'missing', 'bmscan': 'missing'}
 
-    # AMR JSON
-    amr_jsons = glob.glob(f'{sample_id}_amr_data.json')
+    # runAST names its output after the staged PMGA JSON, so the real name is <id>sta-blast_amr_data.json
+    amr_jsons = sorted(set(glob.glob(f'{sample_id}sta*_amr_data.json')
+                           + glob.glob(f'{sample_id}_amr_data.json')))
+    if len(amr_jsons) > 1:
+        print(f"Warning: {len(amr_jsons)} AMR JSONs match {sample_id}, using {amr_jsons[0]}",
+              file=sys.stderr)
     if amr_jsons:
         status['amr'] = 'ok'
         try:
