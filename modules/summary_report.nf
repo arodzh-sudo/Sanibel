@@ -10,7 +10,6 @@ process summary_report {
         path mlst_files
         path kraken_reports
         path pmga_files
-        path neisseria_txt
         path hinfluenzae_txt
         path skani_files
         path resolved_species_files
@@ -32,7 +31,6 @@ process summary_report {
     """
     summary_report.py \
         --outdir   "${outdir}" \
-        --neisseria_txt   ${neisseria_txt} \
         --hinfluenzae_txt ${hinfluenzae_txt}
     """
 }

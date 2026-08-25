@@ -121,6 +121,7 @@ table_cond_formatting_rules:
       - s_eq: "PASS"
     warn:
       - s_contains: "REVIEW"
+      - s_eq: "No data"
     fail:
       - s_contains: "NO ID"
 
@@ -129,6 +130,7 @@ table_cond_formatting_rules:
       - s_eq: "None"
     warn:
       - s_contains: "Possible contamination"
+      - s_eq: "Not screened"
 
   assembly_qc:
     pass:
@@ -141,6 +143,8 @@ table_cond_formatting_rules:
   carbapenemase_family:
     pass:
       - s_eq: "None"
+    warn:
+      - s_eq: "No data"
     fail:
       - s_contains: "VIM"
       - s_contains: "KPC"

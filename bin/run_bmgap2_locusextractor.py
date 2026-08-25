@@ -52,7 +52,7 @@ def main():
         assembly_dir,
     ]
 
-    run_tool(cmd, TAG, cwd=output_dir, on_fail='warn')
+    run_tool(cmd, TAG, cwd=output_dir, on_fail='continue')
 
     le_dirs = glob.glob(os.path.join(output_dir, f"LE_*_{sample_name}_*"))
     if le_dirs:

@@ -87,10 +87,11 @@ def main():
         if pick is None:
             print(f'resolve_ec_shigella: ShigaTyper says {genus} but no {genus} reference '
                   f'clears {MIN_ANI}/{MIN_AF}, keeping {rows[0][1]}', file=sys.stderr)
-        elif pick != rows[0][1]:
+        else:
             resolved = pick
-            print(f"resolve_ec_shigella: {rows[0][1]} -> {pick} on ShigaTyper '{prediction}'",
-                  file=sys.stderr)
+            if pick != rows[0][1]:
+                print(f"resolve_ec_shigella: {rows[0][1]} -> {pick} on ShigaTyper '{prediction}'",
+                      file=sys.stderr)
 
     with open(f'{args.prefix}_species_resolved.txt', 'w') as fh:
         fh.write(f'{resolved}\n' if resolved else '')

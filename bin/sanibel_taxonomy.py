@@ -161,7 +161,9 @@ def extract_contam_candidates(blast16s_tsv_path):
 
 
 def detect_contamination(contam_candidates, self_genus, suppress_synonymous=True):
-    if len(contam_candidates) < 2 or not self_genus:
+    if not self_genus:
+        return 'Not screened'
+    if len(contam_candidates) < 2:
         return 'None'
 
     def is_foreign(genus):

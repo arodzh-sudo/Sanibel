@@ -93,8 +93,6 @@ workflow {
     // MLST CC reference tables
     def mlstTablesDir = "${projectDir}/db/mlst_tables"
     [
-        [ file("${mlstTablesDir}/neisseria.txt"),
-          "https://raw.githubusercontent.com/tseemann/mlst/master/db/pubmlst/neisseria/neisseria.txt" ],
         [ file("${mlstTablesDir}/hinfluenzae.txt"),
           "https://raw.githubusercontent.com/tseemann/mlst/master/db/pubmlst/hinfluenzae/hinfluenzae.txt" ]
     ].each { dst, src ->
@@ -104,7 +102,6 @@ workflow {
         }
     }
 
-    ch_neisseria_txt   = channel.value(file("${mlstTablesDir}/neisseria.txt",   checkIfExists: true))
     ch_hinfluenzae_txt = channel.value(file("${mlstTablesDir}/hinfluenzae.txt", checkIfExists: true))
     ch_mlst_schemes    = channel.value(file("${projectDir}/assets/mlst_schemes.tsv", checkIfExists: true))
 
@@ -299,7 +296,6 @@ workflow {
         ch_mlst.out.map             { _meta, mlst_file -> mlst_file }.collect().ifEmpty([]),
         ch_kraken_enriched.map      { _meta, kr   -> kr   }.collect().ifEmpty([]),
         ch_pmga.out.map             { _meta, pmga_file -> pmga_file }.collect().ifEmpty([]),
-        ch_neisseria_txt,
         ch_hinfluenzae_txt,
         ch_skani.result.map         { _meta, f -> f }.collect().ifEmpty([]),
         ch_resolved.resolved.map    { _meta, f -> f }.collect().ifEmpty([]),
@@ -319,4 +315,16 @@ workflow {
         channel.value(file("${projectDir}/nextflow.config",                     checkIfExists: true)),
         ch_summary.mqc_tables.ifEmpty([])
     )
+
+    // An ignored task or an inner join drops a sample without failing the run, so reconcile
+    ch_summary.summary
+        .map    { rpt -> rpt.readLines().size() - 1 }
+        .combine(ch_reads.count())
+        .subscribe { reported, submitted ->
+            log.info "samples submitted: ${submitted}, reported: ${reported}, " +
+                     "run record: ${params.output}/pipeline_info/"
+            if ( submitted > reported )
+                log.warn "${submitted - reported} sample(s) did not reach sum_report.txt, " +
+                         "see pipeline_info/trace.txt for IGNORED tasks"
+        }
 }

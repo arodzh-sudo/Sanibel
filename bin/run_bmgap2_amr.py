@@ -114,13 +114,16 @@ def main():
         "-s", species_code,
     ]
 
-    run_tool(cmd, TAG, on_fail='continue')
+    result = run_tool(cmd, TAG, on_fail='continue')
 
     amr_json = os.path.join(amr_out_dir, f"{sample_name}_amr_data.json")
     if os.path.isfile(amr_json):
         print(f"{TAG}: Successfully created {amr_json}")
     else:
-        print(f"{TAG}: Warning - Expected output file not found: {amr_json}")
+        # errorStrategy 'ignore' would drop a failed task silently, so record the outcome instead
+        print(f"{TAG}: Warning - expected output file not found: {amr_json}", file=sys.stderr)
+        with open(amr_json, 'w') as f:
+            json.dump({'bmgap2_status': f'runAST_exit_{result.returncode}'}, f)
 
 
 if __name__ == "__main__":

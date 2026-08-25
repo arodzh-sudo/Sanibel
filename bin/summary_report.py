@@ -16,7 +16,11 @@ from sanibel_taxonomy import (
 )
 
 
-NO_DATA = 'No data'
+NO_DATA    = 'No data'                       # tool did not run, or its output was missing or unreadable
+NOT_FOUND  = 'Not detected'                  # tool ran and the locus is absent from the assembly
+UNRESOLVED = 'Present (allele unresolved)'   # locus is in the genome, allele lookup did not resolve
+DISRUPTED  = 'Disrupted ORF'                 # gene is present but not intact
+NEW_ALLELE = 'New allele'                    # present, no database match
 
 SP_MIN_ANI      = 95.0
 SP_MIN_AF       = 50.0
@@ -29,16 +33,21 @@ QC_MIN_N50      = 15000
 
 def normalize_le_value(val):
     if not val:
-        return 'Not detected'
-    if val in ['Not found', 'not found']:
-        return 'Not detected'
-    if val.startswith('Allele not identified') or val.startswith('Peptide not found'):
-        return 'Not detected'
-    if val.startswith('Incomplete ORF') or val.startswith('incomplete ORF'):
-        return 'Not detected'
+        return NO_DATA
+    if val in ['Not found', 'not found'] or val.startswith('Peptide not found'):
+        return NOT_FOUND
+    if val.startswith('Allele not identified'):
+        return UNRESOLVED
+    if val.lower().startswith('incomplete orf'):
+        return DISRUPTED
     if val.startswith('New-BLASTonly') or val.startswith('New-PCR'):
-        return 'New allele'
+        return NEW_ALLELE
     return val
+
+
+def antigen_present(*values):
+    """A locus is in the genome unless the lookup said it was absent or said nothing at all."""
+    return any(v not in (NO_DATA, NOT_FOUND) for v in values)
 
 
 def read_bmscan_species(sample_id):
@@ -65,6 +74,38 @@ def meningitis_organism(skani_species, bmscan_species):
         if key.startswith('haemophilus_influenzae'):
             return 'hinfluenzae'
     return None
+
+
+def mutation_drugs(gene):
+    """The drugs BMGAP2 itself attaches to each curated mutation, deduplicated."""
+    drugs = set()
+    for entry in (gene.get('known_mutations') or {}).values():
+        drugs.update(d.strip() for d in (entry.get('resistance') or '').split(';') if d.strip())
+    return drugs
+
+
+def read_gene(genes, name):
+    """(allele, mutations, phenotype) keyed on BMGAP2's own per-gene status.
+
+    runAST screens a different gene set per species and records a real absence as
+    status Absent, so a key missing from the JSON was never screened."""
+    gene = find_gene(genes, name)
+    if gene is None:
+        return NO_DATA, NO_DATA, NO_DATA
+
+    status = gene.get('status')
+    if status == 'Absent':
+        return NOT_FOUND, NOT_FOUND, NOT_FOUND
+    if status != 'Present':
+        return gene.get('allele') or NO_DATA, NO_DATA, DISRUPTED
+
+    allele = gene.get('allele') or NO_DATA
+    muts = gene.get('known_mutations')
+    if muts is None:
+        return allele, NO_DATA, NO_DATA
+    if not muts:
+        return allele, 'None', 'Susceptible'
+    return allele, ';'.join(muts), 'Resistant'
 
 
 def find_gene(gene_dict, gene_name):
@@ -128,25 +169,20 @@ def lookup_cc(table_path, st, missing_col='NA', default=''):
     return default
 
 
-def parse_mlst(filepath, neisseria_txt=None, hinfluenzae_txt=None):
-    scheme = st = cc = ''
+def parse_mlst(filepath):
+    scheme = st = NO_DATA
     with open(filepath) as f:
         for line in f:
             out = line.strip().split()
             if len(out) >= 3:
                 scheme = out[1]
                 st     = out[2]
-                cc     = ''
                 if scheme in ('-', '') :
-                    scheme = 'Not detected'
+                    scheme = NOT_FOUND
                 if st in ('-', ''):
-                    st = 'Not detected'
-                if scheme == 'neisseria' and neisseria_txt and os.path.isfile(neisseria_txt):
-                    cc = lookup_cc(neisseria_txt, st)
-                elif scheme == 'hinfluenzae' and hinfluenzae_txt and os.path.isfile(hinfluenzae_txt):
-                    cc = lookup_cc(hinfluenzae_txt, st)
+                    st = NOT_FOUND
             break
-    return {'scheme': scheme, 'st': st, 'cc': cc}
+    return {'scheme': scheme, 'st': st}
 
 
 def parse_kraken_report(filepath):
@@ -175,7 +211,8 @@ def parse_pmga(filepath):
 
 
 def parse_skani(filepath):
-    EMPTY = {'ani': 'ANI < 80%', 'confirmed_species': 'Inconclusive', 'align_fraction': NO_DATA, 'reference': NO_DATA}
+    EMPTY  = {'ani': 'ANI < 80%', 'confirmed_species': 'Inconclusive', 'align_fraction': NO_DATA, 'reference': NO_DATA}
+    FAILED = {'ani': NO_DATA, 'confirmed_species': NO_DATA, 'align_fraction': NO_DATA, 'reference': NO_DATA}
     try:
         rows = []
         with open(filepath) as f:
@@ -214,8 +251,17 @@ def parse_skani(filepath):
             'align_fraction':    align_fraction,
             'reference':         skani_ref_acc if skani_ref_acc else NO_DATA,
         }
-    except Exception:
-        return EMPTY
+    except Exception as e:
+        print(f"Warning: Could not parse skani TSV {filepath}: {e}", file=sys.stderr)
+        return FAILED
+
+
+def _read_text(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return ''
 
 
 def apply_resolved_species(sk, skani_path, resolved_path):
@@ -333,14 +379,14 @@ def compute_id_qc(sk, min_ani, min_af, review_ani):
         ani_v = float(ani)
         af_v  = float(af)
     except (TypeError, ValueError):
-        return 'NO ID (ANI < 95%)'
+        return NO_DATA if ani == NO_DATA else f'NO ID (ANI < {min_ani:g}%)'
     if af_v < min_af:
-        return 'NO ID (ANI < 95%)'
+        return f'NO ID (align fraction < {min_af:g}%)'
     if ani_v >= min_ani:
         return 'PASS'
     if ani_v >= review_ani:
         return 'REVIEW (borderline ANI)'
-    return 'NO ID (ANI < 95%)'
+    return f'NO ID (ANI < {min_ani:g}%)'
 
 
 def compute_assembly_qc(coverage, num_contigs, n50, min_cov, warn_contigs, fail_contigs, min_n50,
@@ -390,7 +436,7 @@ def get_ecoli_serotype(sample_dir, sample_id):
         return f"{o_str}:{h_str}"
     except Exception as e:
         print(f"Warning: Could not parse SerotypeFinder JSON for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return NO_DATA
 
 
 def get_klebsiella_serotype(sample_dir, sample_id):
@@ -406,7 +452,7 @@ def get_klebsiella_serotype(sample_dir, sample_id):
                     k = (row.get('K_locus') or '').strip()
                     o = (row.get('O_locus') or '').strip()
                     if k in ('', '-') and o in ('', '-'):
-                        return 'Not detected'
+                        return NOT_FOUND
                     return f"{k or '-'}/{o or '-'}"
         except Exception as e:
             print(f"Warning: Could not parse Kleborate output for {sample_id}: {e}", file=sys.stderr)
@@ -430,7 +476,7 @@ def get_legionella_serotype(sample_dir, sample_id):
                 return ','.join(loci)
     except Exception as e:
         print(f"Warning: Could not parse Legsta output for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return None
 
 
 def get_salmonella_serotype(sample_dir, sample_id):
@@ -448,10 +494,10 @@ def get_salmonella_serotype(sample_dir, sample_id):
                 serotype = row.get('Predicted serotype', '').strip()
                 if profile:
                     return f"{profile}({serotype})" if serotype else profile
-                return 'Not detected'
+                return NOT_FOUND
     except Exception as e:
         print(f"Warning: Could not parse SeqSero2 TSV for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return None
 
 
 def get_gas_serotype(sample_dir, sample_id):
@@ -469,10 +515,10 @@ def get_gas_serotype(sample_dir, sample_id):
                         validated = emm_raw
                     elif fields[1] == 'EMM_nonValidated' and nonvalidated is None:
                         nonvalidated = emm_raw
-        return validated or nonvalidated or 'Not detected'
+        return validated or nonvalidated or NOT_FOUND
     except Exception as e:
         print(f"Warning: Could not parse emm-typing-tool output for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return None
 
 
 def get_shigella_serotype(sample_dir, sample_id):
@@ -485,13 +531,13 @@ def get_shigella_serotype(sample_dir, sample_id):
             for line in f:
                 if found_header:
                     fields = line.strip().split('\t')
-                    return fields[1].strip() if len(fields) >= 2 else 'Not detected'
+                    return fields[1].strip() if len(fields) >= 2 else NOT_FOUND
                 if line.startswith('sample\t'):
                     found_header = True
-        return 'Not detected'
+        return NOT_FOUND
     except Exception as e:
         print(f"Warning: Could not parse Shigatyper output for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return NO_DATA
 
 
 def get_pneumococcal_serotype(sample_dir, sample_id):
@@ -503,10 +549,10 @@ def get_pneumococcal_serotype(sample_dir, sample_id):
             reader = csv.DictReader(f)
             for row in reader:
                 serotype = row.get('Serotype', '').strip()
-                return serotype if serotype else 'Not detected'
+                return serotype if serotype else NOT_FOUND
     except Exception as e:
         print(f"Warning: Could not parse Seroba pred.csv for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return None
 
 
 def _parse_kaptive_txt(filepath):
@@ -536,10 +582,10 @@ def get_acinetobacter_serotype(sample_dir, sample_id):
             parts.append(f"{k_locus}({k_type})" if k_locus and k_type else k_locus or k_type)
         if oc_locus or oc_type:
             parts.append(f"{oc_locus}({oc_type})" if oc_locus and oc_type else oc_locus or oc_type)
-        return '/'.join(parts) if parts else 'Not detected'
+        return '/'.join(parts) if parts else NOT_FOUND
     except Exception as e:
         print(f"Warning: Could not parse Kaptive output for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return None
 
 
 def get_vibrio_serotype(sample_dir, sample_id):
@@ -555,10 +601,10 @@ def get_vibrio_serotype(sample_dir, sample_id):
             parts.append(f"{k_locus}({k_type})" if k_locus and k_type else k_locus or k_type)
         if o_locus or o_type:
             parts.append(f"{o_locus}({o_type})" if o_locus and o_type else o_locus or o_type)
-        return '/'.join(parts) if parts else 'Not detected'
+        return '/'.join(parts) if parts else NOT_FOUND
     except Exception as e:
         print(f"Warning: Could not parse Kaptive VP output for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return None
 
 
 def get_pseudomonas_serotype(sample_dir, sample_id):
@@ -570,10 +616,10 @@ def get_pseudomonas_serotype(sample_dir, sample_id):
             reader = csv.DictReader(f, delimiter='\t')
             for row in reader:
                 stype = row.get('type', '').strip()
-                return stype if stype else 'Not detected'
+                return stype if stype else NOT_FOUND
     except Exception as e:
         print(f"Warning: Could not parse pasty TSV for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return None
 
 
 def get_listeria_serotype(sample_dir, sample_id):
@@ -585,10 +631,10 @@ def get_listeria_serotype(sample_dir, sample_id):
             reader = csv.DictReader(f, delimiter='\t')
             for row in reader:
                 serotype = row.get('SEROTYPE', '').strip()
-                return serotype if serotype else 'Not detected'
+                return serotype if serotype else NOT_FOUND
     except Exception as e:
         print(f"Warning: Could not parse LisSero output for {sample_id}: {e}", file=sys.stderr)
-        return 'Not detected'
+        return None
 
 
 # BMGAP2 data parser
@@ -600,14 +646,15 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
         'parC_allele', 'parC_phenotype',
         'rpoB_allele', 'rpoB_phenotype',
         'ponA_allele', 'ponA_phenotype',
-        'predicted_resistance',
+        'predicted_resistance', 'resistance_markers',
         'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc',
-        'FHbp_variant', 'FHbp_subfamily', 'FHbp_peptide',
-        'NadA_variant', 'NhbA_peptide', 'vaccine_antigens_present',
+        'FHbp_variant', 'FHbp_subfamily', 'FHbp_peptide', 'FHbp_Pfizer',
+        'NadA_variant', 'NhbA_peptide', 'PorA_type', 'vaccine_antigens_present',
         'folA_allele', 'folA_phenotype',
+        'acrR_allele', 'acrR_mutations', 'acrR_phenotype',
         'blaTEM1_status', 'blaROB1_status',
     ]}
-    status = {'amr': 'missing', 'le': 'missing', 'bmscan': 'missing'}
+    status = {'amr': 'no_output', 'le': 'no_output', 'bmscan': 'no_output'}
 
     # runAST names its output after the staged PMGA JSON, so the real name is <id>sta-blast_amr_data.json
     amr_jsons = sorted(set(glob.glob(f'{sample_id}sta*_amr_data.json')
@@ -616,73 +663,41 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
         print(f"Warning: {len(amr_jsons)} AMR JSONs match {sample_id}, using {amr_jsons[0]}",
               file=sys.stderr)
     if amr_jsons:
-        status['amr'] = 'ok'
         try:
             with open(amr_jsons[0]) as f:
                 amr = json.load(f)
+            status['amr'] = amr.get('bmgap2_status', 'ok')
             genes = amr.get('amr_genes', {})
 
-            pena = find_gene(genes, 'penA')
-            if pena:
-                d['penA_allele']    = pena.get('allele', 'Not detected')
-                muts = list(pena.get('known_mutations', {}).keys())
-                d['penA_mutations'] = ';'.join(muts) if muts else 'None'
-                pen_pheno = (amr.get('antimicrobics', {})
-                                .get('Penicillins', {}).get('Penicillin', {}))
+            d['penA_allele'], d['penA_mutations'], _ = read_gene(genes, 'penA')
+            pen_pheno = (amr.get('antimicrobics', {})
+                            .get('Penicillins', {}).get('Penicillin', {}))
+            if pen_pheno:
                 d['penA_phenotype'] = pen_pheno.get('predicted_phenotype', NO_DATA)
 
-            gyra = find_gene(genes, 'gyrA')
-            if gyra:
-                d['gyrA_allele']    = gyra.get('allele', 'Not detected')
-                muts = list(gyra.get('known_mutations', {}).keys())
-                d['gyrA_mutations'] = ';'.join(muts) if muts else 'None'
-                d['gyrA_phenotype'] = 'Susceptible' if not muts else 'Check'
+            d['gyrA_allele'], d['gyrA_mutations'], d['gyrA_phenotype'] = read_gene(genes, 'gyrA')
+            d['parC_allele'], _, d['parC_phenotype'] = read_gene(genes, 'parC')
+            d['rpoB_allele'], _, d['rpoB_phenotype'] = read_gene(genes, 'rpoB')
+            d['ponA_allele'], _, d['ponA_phenotype'] = read_gene(genes, 'ponA')
 
-            parc = find_gene(genes, 'parC')
-            if parc:
-                d['parC_allele']    = parc.get('allele', 'Not detected')
-                muts = list(parc.get('known_mutations', {}).keys())
-                d['parC_phenotype'] = 'Susceptible' if not muts else 'Check'
-
-            rpob = find_gene(genes, 'rpoB')
-            if rpob:
-                d['rpoB_allele']    = rpob.get('allele', 'Not detected')
-                muts = list(rpob.get('known_mutations', {}).keys())
-                d['rpoB_phenotype'] = 'Susceptible' if not muts else 'Resistant'
-
-            pona = find_gene(genes, 'ponA')
-            if pona:
-                d['ponA_allele']    = pona.get('allele', 'Not detected')
-                muts = list(pona.get('known_mutations', {}).keys())
-                d['ponA_phenotype'] = 'Susceptible' if not muts else 'Check'
+            # runAST screens both beta-lactamases for Nm as well as Hi
+            for gene, field in (('blaTEM-1', 'blaTEM1_status'), ('blaROB-1', 'blaROB1_status')):
+                rec = find_gene(genes, gene)
+                d[field] = (rec.get('status') or NO_DATA) if rec else NO_DATA
 
             if organism == 'hinfluenzae':
-                ftsi = find_gene(genes, 'ftsI')
-                if ftsi:
-                    d['penA_allele']    = ftsi.get('allele', 'Not detected')
-                    muts = list(ftsi.get('known_mutations', {}).keys())
-                    d['penA_mutations'] = ';'.join(muts) if muts else 'None'
-                    pen_dict = amr.get('antimicrobics', {}).get('Penicillins', {})
-                    if pen_dict:
-                        d['penA_phenotype'] = next(iter(pen_dict.values())).get(
-                            'predicted_phenotype', 'Not detected'
-                        )
-                    else:
-                        d['penA_phenotype'] = 'Susceptible' if not muts else 'Check'
+                d['penA_allele'], d['penA_mutations'], ftsi_pheno = read_gene(genes, 'ftsI')
+                pen_dict = amr.get('antimicrobics', {}).get('Penicillins', {})
+                amp = pen_dict.get('Ampicillin') or (next(iter(pen_dict.values())) if pen_dict else None)
+                d['penA_phenotype'] = amp.get('predicted_phenotype', NO_DATA) if amp else ftsi_pheno
 
-                fola = find_gene(genes, 'folA')
-                if fola:
-                    d['folA_allele']    = fola.get('allele', 'Not detected')
-                    muts = list(fola.get('known_mutations', {}).keys())
-                    d['folA_phenotype'] = 'Susceptible' if not muts else 'Resistant'
+                d['folA_allele'], _, d['folA_phenotype'] = read_gene(genes, 'folA')
+                d['acrR_allele'], d['acrR_mutations'], d['acrR_phenotype'] = read_gene(genes, 'acrR')
 
-                blatem = find_gene(genes, 'blaTEM-1')
-                if blatem:
-                    d['blaTEM1_status'] = blatem.get('status', 'Not detected')
-
-                blarob = find_gene(genes, 'blaROB-1')
-                if blarob:
-                    d['blaROB1_status'] = blarob.get('status', 'Not detected')
+            drugs = set()
+            for rec in genes.values():
+                drugs |= mutation_drugs(rec)
+            d['resistance_markers'] = ';'.join(sorted(drugs)) if drugs else NOT_FOUND
 
             d['predicted_resistance'] = amr.get('summary', {}).get('predicted_resistance', NO_DATA)
 
@@ -694,8 +709,8 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
     le_dirs = glob.glob(f'LE_*_{sample_id}_*')
     if le_dirs:
         le_csv = os.path.join(le_dirs[0], 'Results_text', f'molecular_data_{sample_id}.csv')
+        status['le'] = 'ran_no_csv'
         if os.path.isfile(le_csv):
-            status['le'] = 'ok'
             try:
                 with open(le_csv) as f:
                     reader = csv.DictReader(f)
@@ -704,14 +719,15 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
                 prokka_rows = [r for r in all_rows if 'prokka' in r.get('Filename', '')]
                 row = prokka_rows[0] if prokka_rows else (all_rows[0] if all_rows else None)
                 if row is not None:
+                    status['le'] = 'ok'
                     if organism == 'hinfluenzae':
                         d['bmgap2_mlst_st'] = row.get('Hi_MLST_ST', '') or NO_DATA
                         hi_st = d['bmgap2_mlst_st']
                         d['bmgap2_mlst_cc'] = NO_DATA
                         if (hinfluenzae_txt and os.path.isfile(hinfluenzae_txt)
-                                and hi_st not in [NO_DATA, 'Not detected', 'New', 'NA', '']):
+                                and hi_st not in [NO_DATA, NOT_FOUND, 'New', 'NA', '']):
                             d['bmgap2_mlst_cc'] = lookup_cc(
-                                hinfluenzae_txt, hi_st, missing_col='Not detected', default=NO_DATA)
+                                hinfluenzae_txt, hi_st, missing_col=NOT_FOUND, default=NO_DATA)
                     else:
                         d['bmgap2_mlst_st'] = row.get('Nm_MLST_ST', '') or NO_DATA
                         d['bmgap2_mlst_cc'] = row.get('Nm_MLST_cc', '') or NO_DATA
@@ -719,18 +735,30 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
                     d['FHbp_variant']  = normalize_le_value(row.get('FHbp_protein_subvariant_Novartis', ''))
                     d['FHbp_subfamily'] = normalize_le_value(row.get('FHbp_subfamily', ''))
                     d['FHbp_peptide']  = normalize_le_value(row.get('FHbp_protein_subvariant_Oxford', ''))
+                    d['FHbp_Pfizer']   = normalize_le_value(row.get('FHbp_protein_subvariant_Pfizer', ''))
                     d['NadA_variant']  = normalize_le_value(row.get('NadA_Protein_subvariant_Novartis', ''))
                     d['NhbA_peptide']  = normalize_le_value(row.get('NhbA_Protein_subvariant_Novartis', ''))
+                    d['PorA_type']     = normalize_le_value(row.get('PorA_type', ''))
 
                     if organism == 'hinfluenzae':
                         d['vaccine_antigens_present'] = 'Not applicable'
                     else:
-                        # Presence only: no peptide identity and no PorA, so not a coverage prediction.
-                        detected = [name for name, val in (('fHbp', d['FHbp_variant']),
-                                                           ('NHBA', d['NhbA_peptide']),
-                                                           ('NadA', d['NadA_variant']))
-                                    if val not in (NO_DATA, 'Not detected')]
-                        d['vaccine_antigens_present'] = ';'.join(detected) if detected else 'None detected'
+                        # Gene presence only: no peptide identity, so not a coverage prediction.
+                        antigens = (('fHbp', (d['FHbp_variant'], d['FHbp_peptide'], d['FHbp_Pfizer'])),
+                                    ('NHBA', (d['NhbA_peptide'],)),
+                                    ('NadA', (d['NadA_variant'],)),
+                                    ('PorA', (d['PorA_type'],)))
+                        detected = []
+                        for name, vals in antigens:
+                            if not antigen_present(*vals):
+                                continue
+                            if DISRUPTED in vals:
+                                detected.append(f'{name}(disrupted)')
+                            elif NEW_ALLELE in vals:
+                                detected.append(f'{name}(new)')
+                            else:
+                                detected.append(name)
+                        d['vaccine_antigens_present'] = ';'.join(detected) if detected else NOT_FOUND
             except Exception as e:
                 status['le'] = 'failed'
                 print(f"Warning: Could not parse LocusExtractor CSV for {sample_id}: {e}", file=sys.stderr)
@@ -765,24 +793,28 @@ HEADER_AMR = ['sampleID', 'carbapenemase_family', 'amr_target',
 
 HEADER_NM = [
     'sampleID', 'bmgap2_status',
-    'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'nm_genogroup', 'predicted_resistance',
+    'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'nm_genogroup',
+    'predicted_resistance', 'resistance_markers',
     'penA_allele', 'penA_mutations', 'penA_phenotype',
     'gyrA_allele', 'gyrA_mutations', 'gyrA_phenotype',
     'parC_allele', 'parC_phenotype',
     'rpoB_allele', 'rpoB_phenotype',
     'ponA_allele', 'ponA_phenotype',
-    'FHbp_variant', 'FHbp_subfamily', 'FHbp_peptide',
-    'NadA_variant', 'NhbA_peptide', 'vaccine_antigens_present',
+    'blaTEM1_status', 'blaROB1_status',
+    'FHbp_variant', 'FHbp_subfamily', 'FHbp_peptide', 'FHbp_Pfizer',
+    'NadA_variant', 'NhbA_peptide', 'PorA_type', 'vaccine_antigens_present',
 ]
 
 HEADER_HI = [
     'sampleID', 'bmgap2_status',
-    'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'hi_capsule_genotype', 'predicted_resistance',
+    'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'hi_capsule_genotype',
+    'predicted_resistance', 'resistance_markers',
     'ftsI_allele', 'ftsI_mutations', 'ftsI_phenotype',
     'gyrA_allele', 'gyrA_mutations', 'gyrA_phenotype',
     'parC_allele', 'parC_phenotype',
     'rpoB_allele', 'rpoB_phenotype',
     'folA_allele', 'folA_phenotype',
+    'acrR_allele', 'acrR_mutations', 'acrR_phenotype',
     'blaTEM1_status', 'blaROB1_status',
 ]
 
@@ -889,12 +921,10 @@ def emit_sanibel_amr_mqc_table(amr_by_sample):
 def main():
     parser = argparse.ArgumentParser(description='Build Sanibel summary reports.')
     parser.add_argument('--outdir',          required=True, help='Pipeline output directory')
-    parser.add_argument('--neisseria_txt',   default=None,  help='Neisseria MLST CC lookup table')
     parser.add_argument('--hinfluenzae_txt', default=None,  help='H. influenzae MLST CC lookup table')
     args = parser.parse_args()
 
     outdir          = args.outdir
-    neisseria_txt   = args.neisseria_txt
     hinfluenzae_txt = args.hinfluenzae_txt
 
     samples = sorted(
@@ -919,7 +949,7 @@ def main():
         asm  = parse_assembly_stats(f'{sid}_assembly_stats.txt')
         rm   = parse_read_metrics(f'{sid}_readMetrics.txt')
         cds  = parse_prokka_txt(f'{sid}.txt')
-        mlst = parse_mlst(f'{sid}.mlst', neisseria_txt, hinfluenzae_txt)
+        mlst = parse_mlst(f'{sid}.mlst')
         kr   = parse_kraken_report(f'{sid}.report')
         pmga = parse_pmga(f'{sid}sta.txt')
 
@@ -947,7 +977,7 @@ def main():
             contamination_flag = detect_contamination(
                 extract_contam_candidates(blast16s_path), skani_genus)
         else:
-            contamination_flag = 'None'
+            contamination_flag = 'Not screened'
 
         scheme   = mlst['scheme']
         pmga_sp  = pmga['species'] or NO_DATA
@@ -986,7 +1016,11 @@ def main():
                     break
 
         species_id_qc = compute_id_qc(sk, SP_MIN_ANI, SP_MIN_AF, SP_REVIEW_ANI)
-        contaminated = contamination_flag not in ('None', NO_DATA)
+        # ANI cannot separate E. coli from Shigella, so an unresolved complex call is not confirmed
+        in_complex = skani_ID_val == 'Escherichia_coli' or skani_genus == 'Shigella'
+        if species_id_qc == 'PASS' and in_complex                 and not _read_text(f'{sid}_species_resolved.txt'):
+            species_id_qc = 'REVIEW (E. coli/Shigella unresolved)'
+        contaminated = contamination_flag not in ('None', 'Not screened', NO_DATA)
         assembly_qc = compute_assembly_qc(
             rm['coverage'], asm['num_contigs'], asm['n50'],
             QC_MIN_COVERAGE, QC_WARN_CONTIGS, QC_FAIL_CONTIGS, QC_MIN_N50, contaminated)
@@ -1011,16 +1045,17 @@ def main():
                 sid, bm['bmgap2_status'],
                 pmga_sp,
                 bm['bmgap2_species'], bm['bmgap2_mlst_st'], bm['bmgap2_mlst_cc'],
-                pmga['serotype_notes'],
+                pmga['serotype_notes'] or NO_DATA,
                 pmga['prediction'] or NO_DATA,
-                bm['predicted_resistance'],
+                bm['predicted_resistance'], bm['resistance_markers'],
                 bm['penA_allele'], bm['penA_mutations'], bm['penA_phenotype'],
                 bm['gyrA_allele'], bm['gyrA_mutations'], bm['gyrA_phenotype'],
                 bm['parC_allele'], bm['parC_phenotype'],
                 bm['rpoB_allele'], bm['rpoB_phenotype'],
                 bm['ponA_allele'], bm['ponA_phenotype'],
-                bm['FHbp_variant'], bm['FHbp_subfamily'], bm['FHbp_peptide'],
-                bm['NadA_variant'], bm['NhbA_peptide'], bm['vaccine_antigens_present'],
+                bm['blaTEM1_status'], bm['blaROB1_status'],
+                bm['FHbp_variant'], bm['FHbp_subfamily'], bm['FHbp_peptide'], bm['FHbp_Pfizer'],
+                bm['NadA_variant'], bm['NhbA_peptide'], bm['PorA_type'], bm['vaccine_antigens_present'],
             ]
             rows_nm.append(nm_row)
 
@@ -1030,14 +1065,15 @@ def main():
                 sid, bm['bmgap2_status'],
                 pmga_sp,
                 bm['bmgap2_species'], bm['bmgap2_mlst_st'], bm['bmgap2_mlst_cc'],
-                pmga['serotype_notes'],
+                pmga['serotype_notes'] or NO_DATA,
                 pmga['prediction'] or NO_DATA,
-                bm['predicted_resistance'],
+                bm['predicted_resistance'], bm['resistance_markers'],
                 bm['penA_allele'], bm['penA_mutations'], bm['penA_phenotype'],
                 bm['gyrA_allele'], bm['gyrA_mutations'], bm['gyrA_phenotype'],
                 bm['parC_allele'], bm['parC_phenotype'],
                 bm['rpoB_allele'], bm['rpoB_phenotype'],
                 bm['folA_allele'], bm['folA_phenotype'],
+                bm['acrR_allele'], bm['acrR_mutations'], bm['acrR_phenotype'],
                 bm['blaTEM1_status'], bm['blaROB1_status'],
             ]
             rows_hi.append(hi_row)
@@ -1049,14 +1085,17 @@ def main():
                 fh.write('\t'.join(str(v).replace(',', ';') for v in row) + '\n')
         print(f"summary_report.py: wrote {path} ({len(rows)} sample(s))")
 
-    rows_amr = [
-        [sid, carbapenemase_family(amr['genes']),
-         amr_target_genes(amr['genes']),
-         ', '.join(amr['genes']),
-         ', '.join(amr['subclasses']) or 'None']
-        for sid, amr in amr_by_sample.items()
-        if amr and amr['genes']
-    ]
+    rows_amr = []
+    for sid, amr in amr_by_sample.items():
+        if amr is None:
+            rows_amr.append([sid, NO_DATA, NO_DATA, NO_DATA, NO_DATA])
+        elif not amr['genes']:
+            rows_amr.append([sid, 'None', 'None', 'None', 'None'])
+        else:
+            rows_amr.append([sid, carbapenemase_family(amr['genes']),
+                             amr_target_genes(amr['genes']),
+                             ', '.join(amr['genes']),
+                             ', '.join(amr['subclasses']) or 'None'])
 
     if rows_std:
         write_report('sum_report.txt',    HEADER_STANDARD, rows_std)

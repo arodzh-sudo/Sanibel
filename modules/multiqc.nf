@@ -58,6 +58,7 @@ process multiqc_global {
         --filename sanibel_report.html \\
         --interactive \\
         --ignore "*/multiqc/*" \\
+        --ignore "*/pipeline_info/*" \\
         --ignore "*sanibel_report*" \\
         --ignore "*report.txt"
 
