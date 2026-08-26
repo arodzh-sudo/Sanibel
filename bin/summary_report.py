@@ -42,6 +42,8 @@ def normalize_le_value(val):
         return DISRUPTED
     if val.startswith('New-BLASTonly') or val.startswith('New-PCR'):
         return NEW_ALLELE
+    if val.startswith('Error'):
+        return NO_DATA
     return val
 
 
@@ -694,10 +696,11 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
                 d['folA_allele'], _, d['folA_phenotype'] = read_gene(genes, 'folA')
                 d['acrR_allele'], d['acrR_mutations'], d['acrR_phenotype'] = read_gene(genes, 'acrR')
 
-            drugs = set()
-            for rec in genes.values():
-                drugs |= mutation_drugs(rec)
-            d['resistance_markers'] = ';'.join(sorted(drugs)) if drugs else NOT_FOUND
+            if genes:
+                drugs = set()
+                for rec in genes.values():
+                    drugs |= mutation_drugs(rec)
+                d['resistance_markers'] = ';'.join(sorted(drugs)) if drugs else NOT_FOUND
 
             d['predicted_resistance'] = amr.get('summary', {}).get('predicted_resistance', NO_DATA)
 
@@ -721,7 +724,7 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
                 if row is not None:
                     status['le'] = 'ok'
                     if organism == 'hinfluenzae':
-                        d['bmgap2_mlst_st'] = row.get('Hi_MLST_ST', '') or NO_DATA
+                        d['bmgap2_mlst_st'] = normalize_le_value(row.get('Hi_MLST_ST', ''))
                         hi_st = d['bmgap2_mlst_st']
                         d['bmgap2_mlst_cc'] = NO_DATA
                         if (hinfluenzae_txt and os.path.isfile(hinfluenzae_txt)
@@ -729,8 +732,8 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
                             d['bmgap2_mlst_cc'] = lookup_cc(
                                 hinfluenzae_txt, hi_st, missing_col=NOT_FOUND, default=NO_DATA)
                     else:
-                        d['bmgap2_mlst_st'] = row.get('Nm_MLST_ST', '') or NO_DATA
-                        d['bmgap2_mlst_cc'] = row.get('Nm_MLST_cc', '') or NO_DATA
+                        d['bmgap2_mlst_st'] = normalize_le_value(row.get('Nm_MLST_ST', ''))
+                        d['bmgap2_mlst_cc'] = normalize_le_value(row.get('Nm_MLST_cc', ''))
 
                     d['FHbp_variant']  = normalize_le_value(row.get('FHbp_protein_subvariant_Novartis', ''))
                     d['FHbp_subfamily'] = normalize_le_value(row.get('FHbp_subfamily', ''))
@@ -986,9 +989,6 @@ def main():
 
         if organism:
             serotype = pmga['prediction'] or NO_DATA
-        elif pmga['prediction']:
-            # PMGA runs on the whole genus, so its call means nothing until the species is confirmed
-            serotype = 'Not confirmed Nm/Hi'
         else:
             # Species-specific serotype from published output dirs
             serotype = NO_DATA

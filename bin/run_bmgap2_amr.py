@@ -116,13 +116,13 @@ def main():
 
     result = run_tool(cmd, TAG, on_fail='continue')
 
-    amr_json = os.path.join(amr_out_dir, f"{sample_name}_amr_data.json")
-    if os.path.isfile(amr_json):
-        print(f"{TAG}: Successfully created {amr_json}")
+    # runAST names its output after the staged PMGA JSON, not after the sample
+    produced = glob.glob(os.path.join(amr_out_dir, '*_amr_data.json'))
+    if produced:
+        print(f"{TAG}: Successfully created {produced[0]}")
     else:
-        # errorStrategy 'ignore' would drop a failed task silently, so record the outcome instead
-        print(f"{TAG}: Warning - expected output file not found: {amr_json}", file=sys.stderr)
-        with open(amr_json, 'w') as f:
+        print(f"{TAG}: Error - runAST wrote no *_amr_data.json in {amr_out_dir}", file=sys.stderr)
+        with open(os.path.join(amr_out_dir, f"{sample_name}_amr_data.json"), 'w') as f:
             json.dump({'bmgap2_status': f'runAST_exit_{result.returncode}'}, f)
 
 
