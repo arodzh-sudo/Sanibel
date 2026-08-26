@@ -44,6 +44,8 @@ def normalize_le_value(val):
         return NEW_ALLELE
     if val.startswith('Error'):
         return NO_DATA
+    if val == 'None identified':
+        return NOT_FOUND
     return val
 
 
@@ -722,7 +724,6 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
                 prokka_rows = [r for r in all_rows if 'prokka' in r.get('Filename', '')]
                 row = prokka_rows[0] if prokka_rows else (all_rows[0] if all_rows else None)
                 if row is not None:
-                    status['le'] = 'ok'
                     if organism == 'hinfluenzae':
                         d['bmgap2_mlst_st'] = normalize_le_value(row.get('Hi_MLST_ST', ''))
                         hi_st = d['bmgap2_mlst_st']
@@ -743,8 +744,17 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
                     d['NhbA_peptide']  = normalize_le_value(row.get('NhbA_Protein_subvariant_Novartis', ''))
                     d['PorA_type']     = normalize_le_value(row.get('PorA_type', ''))
 
+                    antigen_measured = any(
+                        v != NO_DATA for v in (d['FHbp_variant'], d['FHbp_subfamily'],
+                                               d['FHbp_peptide'], d['FHbp_Pfizer'],
+                                               d['NadA_variant'], d['NhbA_peptide'],
+                                               d['PorA_type']))
+                    status['le'] = 'ok' if (antigen_measured
+                                            or d['bmgap2_mlst_st'] != NO_DATA) else 'no_calls'
+
                     if organism == 'hinfluenzae':
-                        d['vaccine_antigens_present'] = 'Not applicable'
+                        if antigen_measured or d['bmgap2_mlst_st'] != NO_DATA:
+                            d['vaccine_antigens_present'] = 'Not applicable'
                     else:
                         # Gene presence only: no peptide identity, so not a coverage prediction.
                         antigens = (('fHbp', (d['FHbp_variant'], d['FHbp_peptide'], d['FHbp_Pfizer'])),
@@ -761,7 +771,10 @@ def parse_bmgap2(sample_id, organism, bmscan_species, hinfluenzae_txt=None):
                                 detected.append(f'{name}(new)')
                             else:
                                 detected.append(name)
-                        d['vaccine_antigens_present'] = ';'.join(detected) if detected else NOT_FOUND
+                        if detected:
+                            d['vaccine_antigens_present'] = ';'.join(detected)
+                        elif antigen_measured:
+                            d['vaccine_antigens_present'] = NOT_FOUND
             except Exception as e:
                 status['le'] = 'failed'
                 print(f"Warning: Could not parse LocusExtractor CSV for {sample_id}: {e}", file=sys.stderr)

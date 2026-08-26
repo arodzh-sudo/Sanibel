@@ -60,7 +60,7 @@ def main():
             le_dirs[0], "Results_text", f"molecular_data_{sample_name}.csv"
         )
         if os.path.isfile(expected):
-            print(f"{TAG}: Successfully generated {expected}")
+            print(f"{TAG}: Wrote {expected}")
         else:
             print(f"{TAG}: Warning - Expected output not found: {expected}", file=sys.stderr)
     else:
