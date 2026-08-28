@@ -168,10 +168,8 @@ All results are written to `params.output/<sample_id>/`. Depending on which spec
 |------|---------|------|------------|
 | `sum_report.txt` | All | 29 | ID · species (skani ANI, Mash, Kraken) · 16S top hit · skani ANI/reference · species-ID QC · contamination flag · MLST scheme/ST · serotype · QC metrics (reads, coverage, assembly stats, GC, CDS) · assembly QC |
 | `amr_report.txt` | All | 5 | ID · carbapenemase family · matched target genes · AMR genes · AMR subclasses |
-| `nm_sum_report.txt` | *N. meningitidis* only | 32 | ID · BMGAP2 status · PMGA capsule genogroup · BMGAP2 AMR alleles/phenotypes · vaccine antigens detected |
-| `hi_sum_report.txt` | *H. influenzae* only | 27 | ID · BMGAP2 status · PMGA capsule genotype · BMGAP2 AMR alleles/phenotypes |
-
-Cells holding more than one value use `;` as the separator, and no cell contains a comma. Excel parses these files as comma-delimited when they are dragged into a window, which splits a row at every comma it finds.
+| `nm_sum_report.txt` | *N. meningitidis* only | 32 | ID · PMGA capsule genogroup · BMGAP2 AMR alleles/phenotypes · vaccine antigens detected · BMGAP2 status |
+| `hi_sum_report.txt` | *H. influenzae* only | 27 | ID · PMGA capsule genotype · BMGAP2 AMR alleles/phenotypes · BMGAP2 status |
 
 Report cells use a fixed vocabulary. A cell is never blank, and only one of these means the answer is negative:
 
@@ -184,6 +182,8 @@ Report cells use a fixed vocabulary. A cell is never blank, and only one of thes
 | `New allele` | present, with no match in the reference database |
 
 `No data` is not a negative result.
+
+For what the *N. meningitidis* and *H. influenzae* columns mean, how the `bmgap2_status` column is read and where BMGAP2 can fail without reporting an error, see [docs/bmgap2-reports.md](docs/bmgap2-reports.md).
 
 `params.output/pipeline_info/` holds the Nextflow run record: `trace.txt`, `execution_report.html` and `timeline.html`. A task that failed under `errorStrategy = 'ignore'` shows as `IGNORED` in the `status` column of `trace.txt`, and the run summary reports how many submitted samples reached `sum_report.txt`.
 

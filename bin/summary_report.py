@@ -808,7 +808,7 @@ HEADER_AMR = ['sampleID', 'carbapenemase_family', 'amr_target',
               'amr_genes', 'amr_subclass']
 
 HEADER_NM = [
-    'sampleID', 'bmgap2_status',
+    'sampleID',
     'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'nm_genogroup',
     'predicted_resistance', 'resistance_markers',
     'penA_allele', 'penA_mutations', 'penA_phenotype',
@@ -819,10 +819,11 @@ HEADER_NM = [
     'blaTEM1_status', 'blaROB1_status',
     'FHbp_variant', 'FHbp_subfamily', 'FHbp_peptide', 'FHbp_Pfizer',
     'NadA_variant', 'NhbA_peptide', 'PorA_type', 'vaccine_antigens_present',
+    'bmgap2_status',
 ]
 
 HEADER_HI = [
-    'sampleID', 'bmgap2_status',
+    'sampleID',
     'pmga_species', 'bmgap2_species', 'bmgap2_mlst_st', 'bmgap2_mlst_cc', 'serotype_notes', 'hi_capsule_genotype',
     'predicted_resistance', 'resistance_markers',
     'ftsI_allele', 'ftsI_mutations', 'ftsI_phenotype',
@@ -832,6 +833,7 @@ HEADER_HI = [
     'folA_allele', 'folA_phenotype',
     'acrR_allele', 'acrR_mutations', 'acrR_phenotype',
     'blaTEM1_status', 'blaROB1_status',
+    'bmgap2_status',
 ]
 
 # MultiQC custom-content emitters
@@ -1055,7 +1057,7 @@ def main():
         if organism == 'neisseria':
             bm = parse_bmgap2(sid, organism, bmscan_species, hinfluenzae_txt)
             nm_row = [
-                sid, bm['bmgap2_status'],
+                sid,
                 pmga_sp,
                 bm['bmgap2_species'], bm['bmgap2_mlst_st'], bm['bmgap2_mlst_cc'],
                 pmga['serotype_notes'] or NO_DATA,
@@ -1069,13 +1071,14 @@ def main():
                 bm['blaTEM1_status'], bm['blaROB1_status'],
                 bm['FHbp_variant'], bm['FHbp_subfamily'], bm['FHbp_peptide'], bm['FHbp_Pfizer'],
                 bm['NadA_variant'], bm['NhbA_peptide'], bm['PorA_type'], bm['vaccine_antigens_present'],
+                bm['bmgap2_status'],
             ]
             rows_nm.append(nm_row)
 
         elif organism == 'hinfluenzae':
             bm = parse_bmgap2(sid, organism, bmscan_species, hinfluenzae_txt)
             hi_row = [
-                sid, bm['bmgap2_status'],
+                sid,
                 pmga_sp,
                 bm['bmgap2_species'], bm['bmgap2_mlst_st'], bm['bmgap2_mlst_cc'],
                 pmga['serotype_notes'] or NO_DATA,
@@ -1088,6 +1091,7 @@ def main():
                 bm['folA_allele'], bm['folA_phenotype'],
                 bm['acrR_allele'], bm['acrR_mutations'], bm['acrR_phenotype'],
                 bm['blaTEM1_status'], bm['blaROB1_status'],
+                bm['bmgap2_status'],
             ]
             rows_hi.append(hi_row)
 
