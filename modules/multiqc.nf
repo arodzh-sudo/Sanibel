@@ -59,6 +59,7 @@ process multiqc_global {
         --interactive \\
         --ignore "*/multiqc/*" \\
         --ignore "*/pipeline_info/*" \\
+        --ignore "*/emm_typing/*" \\
         --ignore "*sanibel_report*" \\
         --ignore "*report.txt"
 
