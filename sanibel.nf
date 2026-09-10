@@ -318,7 +318,7 @@ workflow {
 
     // An ignored task or an inner join drops a sample without failing the run, so reconcile
     ch_summary.summary
-        .map    { rpt -> rpt.readLines().size() - 1 }
+        .map    { rpt -> rpt.readLines('UTF-16').size() - 1 }
         .combine(ch_reads.count())
         .subscribe { reported, submitted ->
             log.info "samples submitted: ${submitted}, reported: ${reported}, " +

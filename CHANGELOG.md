@@ -43,6 +43,7 @@ ANI cannot separate the complex, so ShigaTyper picks the genus and skani names t
 - AMR columns renamed `amr_gene_symbol` / `amr_subclass`.
 - QC thresholds are hardcoded constants, not `nextflow.config` params.
 - Multi-value cells use `;` as the separator in all four text reports; no cell contains a comma. Affects `serotype` for Salmonella, Legionella and Listeria, and the AMR gene and subclass lists. The interactive report keeps comma-separated lists.
+- All four text reports are written as UTF-16LE with a BOM and CRLF line endings, so Excel splits columns on open and keeps non-ASCII values such as `OL2α.1`. Read them on the command line with `iconv -f UTF-16 -t UTF-8`, or in pandas with `encoding='utf-16'`.
 
 ### AMR report
 AMR results live in their own file rather than as trailing columns of the standard report.

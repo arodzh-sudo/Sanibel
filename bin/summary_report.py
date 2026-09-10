@@ -1082,7 +1082,7 @@ def main():
             rows_hi.append(hi_row)
 
     def write_report(path, header, rows):
-        with open(path, 'w', encoding='utf-8-sig') as fh:
+        with open(path, 'w', encoding='utf-16', newline='\r\n') as fh:
             fh.write('\t'.join(header) + '\n')
             for row in sorted(rows, key=lambda r: r[0]):
                 fh.write('\t'.join(str(v).replace(',', ';') for v in row) + '\n')
