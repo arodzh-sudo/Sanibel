@@ -10,7 +10,9 @@ CONTAM_LENGTH = 1400
 
 # Minimum identity/length for a 16S hit to count as a species-ID candidate
 BLAST16S_MIN_LENGTH = 400
-BLAST16S_MIN_PIDENT = 97.0
+BLAST16S_MIN_PIDENT = 98.7
+# Near full-length 16S; outranks any partial hit regardless of identity
+BLAST16S_FULL_LENGTH = 1400
 
 # RefSeq/GenBank accession pattern (GCF_*, GCA_*, NC_*, NZ_*)
 ACCESSION_RE = re.compile(
@@ -184,3 +186,29 @@ def detect_contamination(contam_candidates, self_genus, suppress_synonymous=True
                 if is_foreign(genus_b):
                     return f"Possible contamination: {genus_b} detected on contig {qid_b}"
     return 'None'
+
+
+def blast16s_rank_key(hit):
+    return (hit.length < BLAST16S_FULL_LENGTH, -hit.pident, -hit.bitscore)
+
+
+def blast16s_top_hit(path):
+    hits = sorted(
+        (h for h in iter_blast16s_rows(path)
+         if h.genus and h.length >= BLAST16S_MIN_LENGTH and h.pident >= BLAST16S_MIN_PIDENT),
+        key=blast16s_rank_key,
+    )
+    if not hits:
+        return None
+    tier, neg_pident, _bs = blast16s_rank_key(hits[0])
+    genera = []
+    for h in hits:
+        if blast16s_rank_key(h)[:2] != (tier, neg_pident):
+            break
+        if h.genus.lower() not in (g.lower() for g in genera):
+            genera.append(h.genus)
+    return genera, hits[0].pident
+
+
+def format_16s(genera):
+    return '/'.join(genera) + ' sp.'

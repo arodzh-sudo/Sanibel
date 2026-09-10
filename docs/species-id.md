@@ -24,11 +24,16 @@ assembly:
 | ------ | ------ | --------------- |
 | Mash | `mash` then `parse_assembly` | Closest RefSeq sketch (genus, species, accession, distance) |
 | Kraken2 | `kraken` | Read-level classification (genus, species, % reads) |
-| 16S rRNA BLAST | `blast_16s` | Top 16S hits against the NCBI rRNA 16S DB (genus, species, %identity) |
+| 16S rRNA BLAST | `blast_16s` | Top 16S hits against the NCBI rRNA 16S DB (genus, %identity) |
 
 A 16S hit only counts toward ID once it clears
-[**400 bp and 97% identity**](../bin/sanibel_taxonomy.py#L12-L13) and only resolves to
-species rather than genus at [**98.7% identity**](../bin/aggregate_species_id.py#L24).
+[**400 bp and 98.7% identity**](../bin/sanibel_taxonomy.py#L12-L13), and 16S reports a genus,
+never a species. [`blast16s_top_hit`](../bin/sanibel_taxonomy.py#L191-L210) ranks hits of at
+least [**1400 bp**](../bin/sanibel_taxonomy.py#L15) above any shorter hit, then by identity,
+then bitscore. When hits tied at the top name more than one genus, all of them are reported,
+for example `Escherichia/Shigella sp.` The same value fills the `blast16s:` evidence in
+`candidate_species.txt` and the `blast_16s_tophit` column in `sum_report.txt`: `Not detected`
+when no hit qualifies, `No data` when the BLAST output is missing.
 
 ## Building the candidate pool
 
@@ -37,7 +42,8 @@ species rather than genus at [**98.7% identity**](../bin/aggregate_species_id.py
 rather than a single winner:
 
 - Each tool's [top 3](../bin/build_candidate_pool.py#L30) is seeded into the pool whether
-  or not the others agree (Mash by distance, Kraken2 by reads, 16S by %identity).
+  or not the others agree (Mash by distance, Kraken2 by reads, 16S by the top-hit ranking).
+  16S nominates the species named on each qualifying hit; skani decides whether it is right.
 - Remaining slots fill by number of supporting tools (desc), then Mash distance (asc),
   then 16S %identity (desc).
 - The pool is capped at [**15**](../bin/build_candidate_pool.py#L31) candidates.
@@ -117,8 +123,7 @@ in the resolved genus. Nothing changes when neither exists, or when the row it p
 already skani's top hit. That species name is what reaches `meta.species`, and
 [`apply_resolved_species`](../bin/summary_report.py) re-points `skani_species`, `skani_ani`,
 `skani_align_fraction` and `skani_reference` at the same row, so all four describe one
-reference. The `blast_16s_tophit` anchor and the contamination anchor follow the resolved
-genus.
+reference. The contamination anchor follows the resolved genus.
 
 ## When skani cannot confirm
 
@@ -144,11 +149,12 @@ matter when skani succeeded. It collapses the three nominations into one row:
 genus  species  confidence  evidence
 ```
 
-- Genus is the majority genus across the three tools. Species is the majority species
-  among the tools that agreed on that genus.
-- [Confidence](../bin/aggregate_species_id.py#L121) is `high` when all three agree on
-  genus and species, `medium` when two agree, `low` otherwise. A `low` result is reported
-  as `Inconclusive`.
+- Genus is the majority genus across the three tools, with 16S voting its first-ranked
+  genus. Species is the majority species among Mash and Kraken2 when they agreed on that genus.
+- [Confidence](../bin/aggregate_species_id.py#L76-L83) is `high` when all three agree,
+  `medium` when two agree, `low` otherwise. Mash and Kraken2 agree by matching genus and
+  species; 16S agrees when the winning genus is among its top genera. A `low` result is
+  reported as `Inconclusive`.
 - `evidence` shows what each tool called, so a disagreement is visible directly.
 
 This row is published per sample as `<id>_candidate_species.txt`. It does not feed the
@@ -158,7 +164,7 @@ summary report and drives no downstream module.
 
 Contamination is reported once, in `sum_report.txt` and is computed by
 [`summary_report`](../bin/summary_report.py), not by the vote.
-[`detect_contamination`](../bin/sanibel_taxonomy.py#L145-L184) keeps the best 16S hit per
+[`detect_contamination`](../bin/sanibel_taxonomy.py#L147-L188) keeps the best 16S hit per
 contig, each clearing [**99% identity over 1400 bp**](../bin/sanibel_taxonomy.py#L8-L9), then
 flags the sample when two of those contigs carry different genera whose subject ranges
 overlap. Genus pairs registered as synonyms are suppressed. The genus reported as the

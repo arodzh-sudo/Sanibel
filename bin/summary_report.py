@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from sanibel_taxonomy import (
     genus_of, detect_contamination, extract_contam_candidates,
-    iter_blast16s_rows, BLAST16S_MIN_LENGTH, BLAST16S_MIN_PIDENT,
+    blast16s_top_hit, format_16s,
 )
 
 
@@ -307,23 +307,14 @@ def apply_resolved_species(sk, skani_path, resolved_path):
             'align_fraction': align_fraction, 'reference': reference}
 
 
-def parse_blast16s_result(filepath, anchor_genera=None):
-    qualifying = []
-    for hit in iter_blast16s_rows(filepath):
-        if hit.length < BLAST16S_MIN_LENGTH or hit.pident < BLAST16S_MIN_PIDENT:
-            continue
-        qualifying.append((hit.pident, hit.length, hit.genus or '', hit.bitscore))
-    if not qualifying:
+def parse_blast16s_result(filepath):
+    if not os.path.isfile(filepath):
         return {'pident': NO_DATA, 'tophit': NO_DATA}
-
-    qualifying.sort(key=lambda r: (-r[0], abs(r[1] - 1500), -r[3]))
-
-    anchor = {g.lower() for g in (anchor_genera or []) if g and g not in (NO_DATA, 'Unknown')}
-    chosen = next((r for r in qualifying if r[2].lower() in anchor), qualifying[0]) if anchor \
-             else qualifying[0]
-
-    pident, _len, genus, _bs = chosen
-    return {'pident': f"{pident:.3f}", 'tophit': f"{genus} spp." if genus else NO_DATA}
+    top = blast16s_top_hit(filepath)
+    if not top:
+        return {'pident': NOT_FOUND, 'tophit': NOT_FOUND}
+    genera, pident = top
+    return {'pident': f"{pident:.3f}", 'tophit': format_16s(genera)}
 
 
 AMR_TARGETS = [
@@ -982,14 +973,9 @@ def main():
         skani_ID_ref_val = sk['reference']
 
         skani_genus  = genus_of(skani_ID_val) if skani_ID_val not in (NO_DATA, 'NO ID', 'Inconclusive', '', None) else None
-        mash_genus   = asm['genus']
-        kraken_genus = kr['species'].split()[0] if kr['species'] != NO_DATA else None
 
         blast16s_path   = f'{sid}_16s_blast.tsv'
-        anchor_16s      = [skani_genus] if skani_genus else [mash_genus, kraken_genus]
-        blast16s_result = parse_blast16s_result(blast16s_path, anchor_genera=anchor_16s) \
-                          if os.path.isfile(blast16s_path) \
-                          else {'pident': NO_DATA, 'tophit': NO_DATA}
+        blast16s_result = parse_blast16s_result(blast16s_path)
 
         if skani_genus and os.path.isfile(blast16s_path):
             contamination_flag = detect_contamination(

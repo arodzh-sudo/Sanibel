@@ -15,11 +15,12 @@ All notable changes to Sanibel are documented in this file.
 Candidate pool plus skani ANI replaces the Kraken2/Mash agreement heuristic.
 
 - `modules/blast_16s.nf`: NCBI `16S_ribosomal_RNA` megablast per assembly, `perc_identity` 97.
+- 16S ID (vote, candidate pool, summary): hits count at 400 bp and 98.7% identity, full-length (1400 bp+) hits rank first, then identity, then bitscore; genus only, tied genera joined (`Escherichia/Shigella sp.`). Contamination keeps 99% over 1400 bp.
 - `bin/build_candidate_pool.py`: ranked pool, each tool's top 3 seeded, capped at 15; Kraken2 needs 10+ clade reads.
 - `modules/candidate_references.nf`: 5 RefSeq genomes per candidate plus the Mash sketch representative.
 - `modules/skani.nf`: species call requires ANI >= 95 and alignment fraction >= 50.
 - `sanibel.nf`: no confident skani call sets `meta.species` to `Unknown` and withholds species-specific typing.
-- `bin/summary_report.py`: `skani_species` is skani's best reference; `blast_16s_tophit` anchored on the skani genus.
+- `bin/summary_report.py`: `skani_species` is skani's best reference; `blast_16s_tophit` is the unanchored 16S top hit, the same one in the `candidate_species.txt` evidence.
 - `bin/sanibel_taxonomy.py` (new): shared synonymous-genus table and contig-overlap contamination logic.
 - Contamination reported once in `sum_report.txt`, against the skani genus; `SYNONYMOUS_PAIRS` suppresses 16S-indistinguishable pairs.
 - `candidate_species.txt`: 2-of-3 vote review record; does not feed the summary report.

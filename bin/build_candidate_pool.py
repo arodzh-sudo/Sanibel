@@ -9,7 +9,7 @@ Output (stdout, TSV):
     species  tools  accession  mash_distance  kraken_pct  blast16s_pident
 
 Each row is one candidate species. Each tool's top-3 (mash by distance, kraken by
-reads, 16S by pident) is seeded into the pool regardless of corroboration; the
+reads, 16S by length tier then pident) is seeded into the pool regardless of corroboration; the
 remaining slots fill by number of supporting tools (desc), then mash_distance (asc),
 then blast16s_pident (desc), capped at POOL_CAP.
 """
@@ -20,7 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from sanibel_taxonomy import (
     iter_blast16s_rows, iter_kraken_species_rows, find_accession, parse_mash_ref,
-    BLAST16S_MIN_LENGTH, BLAST16S_MIN_PIDENT,
+    blast16s_rank_key, BLAST16S_MIN_LENGTH, BLAST16S_MIN_PIDENT,
 )
 
 KRAKEN_ADAPT_FACTOR = 0.15
@@ -119,25 +119,17 @@ def kraken_seed_rows(kraken_rows, n):
 # 16S BLAST parsing
 
 def parse_16s_candidates(filepath):
-    qualifying = []
+    best = {}
     for hit in iter_blast16s_rows(filepath):
         if hit.length < BLAST16S_MIN_LENGTH or hit.pident < BLAST16S_MIN_PIDENT:
             continue
         if hit.species is None:
             continue
-        qualifying.append((hit.genus, hit.species, hit.pident))
+        key = f"{hit.genus.lower()} {hit.species.lower()}"
+        if key not in best or blast16s_rank_key(hit) < blast16s_rank_key(best[key]):
+            best[key] = hit
 
-    if not qualifying:
-        return []
-
-    best = {}
-    for genus, species, pident in qualifying:
-        key = f"{genus.lower()} {species.lower()}"
-        if key not in best or pident > best[key][2]:
-            best[key] = (genus, species, pident)
-
-    sorted_cands = sorted(best.values(), key=lambda r: r[2], reverse=True)
-    return sorted_cands
+    return [(h.genus, h.species, h.pident) for h in sorted(best.values(), key=blast16s_rank_key)]
 
 
 # Merge / rank
