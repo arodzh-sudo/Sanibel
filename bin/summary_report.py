@@ -391,7 +391,7 @@ def compute_assembly_qc(coverage, num_contigs, n50, min_cov, warn_contigs, fail_
         contigs = int(float(num_contigs))
         n50_v   = int(float(n50))
     except (TypeError, ValueError):
-        return NO_DATA
+        return 'FAIL: contamination' if contaminated else NO_DATA
     fails, warns = [], []
     if cov < min_cov:
         fails.append(f'coverage <{min_cov:g}x')
@@ -401,10 +401,10 @@ def compute_assembly_qc(coverage, num_contigs, n50, min_cov, warn_contigs, fail_
         warns.append(f'contigs >={warn_contigs}')
     if n50_v < min_n50:
         warns.append(f'N50 <{min_n50}')
+    if contaminated:
+        fails.append('contamination')
     if fails:
         return 'FAIL: ' + '; '.join(fails + warns)
-    if contaminated:
-        return 'FAIL (Contamination)'
     if warns:
         return 'Warning: ' + '; '.join(warns)
     return 'PASS'
@@ -873,8 +873,6 @@ def _write_mqc(path, preamble_lines, header, cols, rows):
 
 
 def emit_sanibel_mqc_tables(rows_std):
-    if not rows_std:
-        return
     _write_mqc(
         'sanibel_species_mqc.tsv',
         _mqc_preamble(
@@ -931,19 +929,12 @@ def main():
     parser = argparse.ArgumentParser(description='Build Sanibel summary reports.')
     parser.add_argument('--outdir',          required=True, help='Pipeline output directory')
     parser.add_argument('--hinfluenzae_txt', default=None,  help='H. influenzae MLST CC lookup table')
+    parser.add_argument('--samples', nargs='+', required=True, help='Every submitted sample ID')
     args = parser.parse_args()
 
     outdir          = args.outdir
     hinfluenzae_txt = args.hinfluenzae_txt
-
-    samples = sorted(
-        f.replace('_assembly_stats.txt', '')
-        for f in glob.glob('*_assembly_stats.txt')
-    )
-
-    if not samples:
-        print('summary_report.py: no *_assembly_stats.txt files found.', file=sys.stderr)
-        sys.exit(1)
+    samples         = sorted(set(args.samples))
 
     rows_std = []
     rows_nm  = []
@@ -951,6 +942,11 @@ def main():
     amr_by_sample = {}
 
     for sid in samples:
+        if not os.path.isfile(f'{sid}_assembly_stats.txt'):
+            rows_std.append([sid, NO_DATA, NO_DATA, 'FAIL: no assembly']
+                            + [NO_DATA] * (len(HEADER_STANDARD) - 4))
+            continue
+
         sample_dir = os.path.join(outdir, sid)
 
         amr_by_sample[sid] = parse_amrfinder(f'{sid}_amrfinderplus_report.tsv')
@@ -1100,8 +1096,7 @@ def main():
                              ', '.join(amr['genes']),
                              ', '.join(amr['subclasses']) or 'None'])
 
-    if rows_std:
-        write_report('sum_report.txt',    HEADER_STANDARD, rows_std)
+    write_report('sum_report.txt',    HEADER_STANDARD, rows_std)
     if rows_nm:
         write_report('nm_sum_report.txt', HEADER_NM,       rows_nm)
     if rows_hi:
@@ -1111,10 +1106,6 @@ def main():
 
     emit_sanibel_mqc_tables(rows_std)
     emit_sanibel_amr_mqc_table(amr_by_sample)
-
-    if not (rows_std or rows_nm or rows_hi):
-        print('summary_report.py: no rows generated.', file=sys.stderr)
-        sys.exit(1)
 
 
 if __name__ == '__main__':

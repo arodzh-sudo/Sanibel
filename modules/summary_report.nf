@@ -4,6 +4,7 @@ process summary_report {
 
     input:
         val  barrier
+        val  sample_ids
         path assembly_stats_files
         path read_metrics_files
         path prokka_txt_files
@@ -31,6 +32,7 @@ process summary_report {
     """
     summary_report.py \
         --outdir   "${outdir}" \
-        --hinfluenzae_txt ${hinfluenzae_txt}
+        --hinfluenzae_txt ${hinfluenzae_txt} \
+        --samples  ${sample_ids.join(' ')}
     """
 }

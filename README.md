@@ -171,6 +171,8 @@ All results are written to `params.output/<sample_id>/`. Depending on which spec
 | `nm_sum_report.txt` | *N. meningitidis* only | 32 | ID · PMGA capsule genogroup · BMGAP2 AMR alleles/phenotypes · vaccine antigens detected · BMGAP2 status |
 | `hi_sum_report.txt` | *H. influenzae* only | 27 | ID · PMGA capsule genotype · BMGAP2 AMR alleles/phenotypes · BMGAP2 status |
 
+Every submitted sample has a `sum_report.txt` row. A sample that did not assemble has `FAIL: no assembly` in `assembly_qc` and `No data` in every other column.
+
 Report cells use a fixed vocabulary. A cell is never blank, and only one of these means the answer is negative:
 
 | Cell | Meaning |
@@ -185,7 +187,7 @@ Report cells use a fixed vocabulary. A cell is never blank, and only one of thes
 
 For what the *N. meningitidis* and *H. influenzae* columns mean, how the `bmgap2_status` column is read and where BMGAP2 can fail without reporting an error, see [docs/bmgap2-reports.md](docs/bmgap2-reports.md).
 
-`params.output/pipeline_info/` holds the Nextflow run record: `trace.txt`, `execution_report.html` and `timeline.html`. A task that failed under `errorStrategy = 'ignore'` shows as `IGNORED` in the `status` column of `trace.txt`, and the run summary reports how many submitted samples reached `sum_report.txt`.
+`params.output/pipeline_info/` holds the Nextflow run record: `trace.txt`, `execution_report.html` and `timeline.html`. A task that failed under `errorStrategy = 'ignore'` shows as `IGNORED` in the `status` column of `trace.txt`, and the run summary reports how many submitted samples reached `sum_report.txt` and how many did not assemble.
 
 ### 🤝 Contributing
 We welcome contributions to make Sanibel better! Feel free to open issues or submit pull requests to suggest any additional features or enhancements!

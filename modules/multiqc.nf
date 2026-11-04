@@ -19,7 +19,8 @@ process multiqc_global {
 
     input:
         path summary
-        path multiqc_config
+        val  version
+        path multiqc_config, stageAs: 'multiqc_config.template.yaml'
         path custom_logo
         path custom_css
         path nf_config
@@ -53,8 +54,10 @@ process multiqc_global {
         | sort -u
     } > "${params.output}/sanibel_versions_mqc.tsv"
 
+    sed 's/@SANIBEL_VERSION@/${version}/' ${multiqc_config} > multiqc_config.yaml
+
     multiqc ${params.output} \\
-        -c ${multiqc_config} \\
+        -c multiqc_config.yaml \\
         --filename sanibel_report.html \\
         --interactive \\
         --ignore "*/multiqc/*" \\

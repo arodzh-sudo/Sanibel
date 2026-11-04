@@ -6,7 +6,7 @@ intro_text: >
 
 report_header_info:
   - Pipeline: "Sanibel (https://github.com/BPHL-Molecular/Sanibel)"
-  - Version: "v2.1.0"
+  - Version: "v@SANIBEL_VERSION@"
   - Contact: "bphl-sebioinformatics@flhealth.gov"
   - Laboratory: "Florida Bureau of Public Health Laboratories"
 
@@ -131,6 +131,7 @@ table_cond_formatting_rules:
     warn:
       - s_contains: "Possible contamination"
       - s_eq: "Not screened"
+      - s_eq: "No data"
 
   assembly_qc:
     pass:

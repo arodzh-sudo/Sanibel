@@ -38,7 +38,8 @@ ANI cannot separate the complex, so ShigaTyper picks the genus and skani names t
 ### Report columns
 - New: `blast_16s_tophit`, `blast_16s_pident`, `skani_species`, `skani_ani`, `skani_align_fraction`, `skani_reference`, `contamination_flag`.
 - `species_id_qc` (col 2): `PASS` / `REVIEW (borderline ANI)` / `NO ID (ANI < 95%)`.
-- `assembly_qc` (col 4): `PASS` / `Warning:` / `FAIL:` / `FAIL (Contamination)`, from coverage, contigs, N50 and contamination.
+- `assembly_qc` (col 4): `PASS` / `Warning:` / `FAIL:` from coverage, contigs, N50 and contamination. A FAIL lists every failing reason, such as `FAIL: coverage <40x; contamination`.
+- A sample that did not assemble still gets a `sum_report.txt` row: `assembly_qc` is `FAIL: no assembly` and every other cell is `No data`.
 - Kraken2 columns renamed `kraken2_species` / `kraken2_percent`; output moved to `<sample>/kraken2/`.
 - AMR columns renamed `amr_gene_symbol` / `amr_subclass`.
 - QC thresholds are hardcoded constants, not `nextflow.config` params.
@@ -66,9 +67,11 @@ General Statistics reports raw and clean read metrics side by side.
 
 ### Reliability
 - `sanibel.nf`: the optional-typing barrier defaults to `true`, so a run with no species-specific output still produces a report.
-- `nextflow.config`: `unicycler` uses `errorStrategy = 'ignore'`, so a sample that cannot be assembled drops out instead of ending the run.
+- `nextflow.config`: `unicycler` uses `errorStrategy = 'ignore'`, so a sample that cannot be assembled is reported as `FAIL: no assembly` instead of ending the run.
 - `modules/unicycler.nf`: an assembly with no contigs fails the task rather than passing an empty FASTA to QUAST.
-- `sanibel.nf`: a sample whose QUAST report carries no usable assembly length is dropped with a warning, keeping `readssum` from dividing by a zero genome size.
+- `sanibel.nf`: a sample whose QUAST report carries no usable assembly length skips downstream analysis with a warning, keeping `readssum` from dividing by a zero genome size, and is reported as `FAIL: no assembly`.
+- `sanibel.nf`: the run summary warns with the count of `FAIL: no assembly` samples.
+- `nextflow.config`: `manifest.version` holds the release version. The startup banner prints it and the interactive report header reads it at run time.
 
 ### BMGAP2 resume
 - `modules/bmgap2_amr.nf`: takes the PMGA BLAST JSON as a staged `path` input instead of reading `${params.output}/<id>/pmga`.

@@ -71,6 +71,7 @@ workflow {
     log.info """
     Sanibel — Bacterial WGS Analysis Pipeline
     ==========================================================================
+    version     : ${workflow.manifest.version}
     input dir   : ${params.input}
     output dir  : ${params.output}
     bmgap2 db   : ${params.bmgap2_db}
@@ -144,7 +145,7 @@ workflow {
         .map { meta, stats ->
             def fields = stats.text.trim().split(',')
             def size   = fields[8].isLong() ? fields[8].toLong() : 0
-            if (!size) log.warn "${meta.id}: QUAST reported no assembly length, dropping the sample"
+            if (!size) log.warn "${meta.id}: QUAST reported no assembly length, reporting it as FAIL: no assembly"
             def enriched_meta = meta + [
                 mash_genus:   fields[0],
                 mash_species: fields[0] + '_' + fields[1],
@@ -290,6 +291,7 @@ workflow {
 
     ch_summary = summary_report(
         ch_optional_barrier,
+        ch_reads.map { meta, _files -> meta.id }.collect(),
         ch_stats.map { _meta, stats -> stats }.collect().ifEmpty([]),
         ch_readssum.out.map         { _meta, rm   -> rm   }.collect().ifEmpty([]),
         ch_prokka.cds_txt.map       { _meta, ptxt -> ptxt }.collect().ifEmpty([]),
@@ -309,6 +311,7 @@ workflow {
     // Run-level interactive MultiQC across all samples
     multiqc_global(
         ch_summary.summary,
+        channel.value(workflow.manifest.version),
         channel.value(file("${projectDir}/assets/multiqc_config.yaml",         checkIfExists: true)),
         channel.value(file("${projectDir}/assets/sanibel_pipeline_logo_v2.png", checkIfExists: true)),
         channel.value(file("${projectDir}/assets/sanibel_report.css",           checkIfExists: true)),
@@ -318,13 +321,19 @@ workflow {
 
     // An ignored task or an inner join drops a sample without failing the run, so reconcile
     ch_summary.summary
-        .map    { rpt -> rpt.readLines('UTF-16').size() - 1 }
+        .map    { rpt ->
+            def rows = rpt.readLines('UTF-16').drop(1)
+            [ rows.size(), rows.count { row -> row.split('\t')[3] == 'FAIL: no assembly' } ]
+        }
         .combine(ch_reads.count())
-        .subscribe { reported, submitted ->
+        .subscribe { reported, unassembled, submitted ->
             log.info "samples submitted: ${submitted}, reported: ${reported}, " +
                      "run record: ${params.output}/pipeline_info/"
             if ( submitted > reported )
                 log.warn "${submitted - reported} sample(s) did not reach sum_report.txt, " +
                          "see pipeline_info/trace.txt for IGNORED tasks"
+            if ( unassembled )
+                log.warn "${unassembled} sample(s) did not assemble, reported as FAIL: no assembly, " +
+                         "see pipeline_info/trace.txt"
         }
 }
