@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """sanibel_taxonomy.py — shared taxonomy / contamination primitives."""
 
+import os
 import re
 from collections import namedtuple
+
+SKANI_MIN_ANI = 95.0
+SKANI_MIN_AF  = 50.0
 
 # Minimum identity/length for a 16S hit to count as a contamination candidate.
 CONTAM_PIDENT = 99.0
@@ -121,6 +125,37 @@ def iter_blast16s_rows(path):
             species = words[1] if len(words) > 1 else None
             yield BlastHit(parts[0], pident, length, sstart, send, bitscore,
                            stitle, genus, species)
+
+
+SkaniRow = namedtuple('SkaniRow', 'ani align_fraction species reference')
+
+
+def read_skani_rows(path):
+    """skani dist rows, highest ANI first. References are named <species>__<accession>.fna."""
+    rows = []
+    try:
+        fh = open(path)
+    except OSError:
+        return rows
+    with fh:
+        fh.readline()
+        for line in fh:
+            parts = line.rstrip('\n').split('\t')
+            if len(parts) < 5:
+                continue
+            try:
+                ani = float(parts[2])
+            except ValueError:
+                continue
+            name = os.path.basename(parts[0])
+            if name.endswith('.fna'):
+                name = name[:-4]
+            species, _, reference = name.partition('__')
+            if not reference and len(parts) > 5 and parts[5].strip():
+                reference = parts[5].split()[0]
+            rows.append(SkaniRow(ani, parts[4], species or None, reference or None))
+    rows.sort(key=lambda r: r.ani, reverse=True)
+    return rows
 
 
 def iter_kraken_species_rows(path):

@@ -143,7 +143,7 @@ Sanibel is made possible thanks to the following tools:
 
 <small>
 
-**Quality Control** - [FastQC](https://github.com/s-andrews/FastQC) · [Trimmomatic](https://github.com/usadellab/Trimmomatic) · [BBTools](https://github.com/bbushnell/BBTools) · [MultiQC](https://github.com/MultiQC/MultiQC) · [Lyveset](https://github.com/lskatz/lyve-SET)
+**Quality Control** - [FastQC](https://github.com/s-andrews/FastQC) · [Trimmomatic](https://github.com/usadellab/Trimmomatic) · [BBTools](https://github.com/bbushnell/BBTools) · [MultiQC](https://github.com/MultiQC/MultiQC) · [SeqKit](https://github.com/shenwei356/seqkit)
 
 **Assembly & Annotation** - [Unicycler](https://github.com/rrwick/Unicycler) · [QUAST](https://github.com/ablab/quast) · [Prokka](https://github.com/tseemann/prokka)
 

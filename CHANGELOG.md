@@ -49,7 +49,7 @@ ANI cannot separate the complex, so ShigaTyper picks the genus and skani names t
 ### AMR report
 AMR results live in their own file rather than as trailing columns of the standard report.
 
-- `amr_report.txt` (new): `sampleID`, `carbapenemase_family`, `amr_target`, `amr_genes`, `amr_subclass`. Samples with no detected genes are omitted.
+- `amr_report.txt` (new): `sampleID`, `carbapenemase_family`, `amr_target`, `amr_genes`, `amr_subclass`. Samples with no detected genes have `None` in every column.
 - `amr_target` lists the matched gene symbols, such as `blaKPC-3, blaNDM-1`, or `None`. Targets are VIM, KPC, IMP, OXA-48 and NDM; OXA-48 matches `blaOXA-48` alone, not other OXA family genes.
 - `carbapenemase_family` holds the broad labels for the same hits, such as `KPC, NDM`, and carries the conditional formatting in the interactive report.
 - `sum_report.txt` drops the AMR columns, leaving 29 columns.
@@ -62,11 +62,13 @@ General Statistics reports raw and clean read metrics side by side.
 - `assets/multiqc_config.yaml`: second `fastqc` module instance anchored `fastqc_raw`, filtered to `*/fastqc/*`. All twelve of its sections are removed, so it contributes general-statistics columns only.
 - Sequence count, GC and median read length are forced visible for both instances. `median_sequence_length` hides itself when every sample falls within 10 bp, which is why it never appeared before.
 - `modules/fastqc.nf`: raw reads are linked to `<id>_R{1,2}.fastq.gz` before FastQC runs. MultiQC names samples from the `Filename` recorded inside `fastqc_data.txt`, so raw and clean have to share a stem to land on one row.
-- `modules/multiqc.nf`: `--ignore "*/fastqc/*"` dropped so the raw directory is scanned; `--ignore "*sum_report.txt"` widened to `*report.txt`.
+- `modules/multiqc.nf`: `multiqc_global` builds the report from the FastQC, QUAST and Prokka outputs and the summary tables staged into its work directory. It no longer scans or writes into the output directory.
 - Raw FastQC artifacts renamed `<id>_R{1,2}_original_fastqc.*`, previously `<id>_{1,2}_original_fastqc.*`.
 
 ### Reliability
-- `sanibel.nf`: the optional-typing barrier defaults to `true`, so a run with no species-specific output still produces a report.
+- `summary_report` takes the serotyper results as staged inputs. It no longer reads them from the output directory, which Nextflow publishes asynchronously.
+- `sanibel.nf`: an input directory with no FASTQ pairs stops the run with an error.
+- `nextflow.config`: container names drop the `docker://` prefix, which the Docker engine does not accept; Apptainer and Singularity add it themselves. The `emm_typing` bind mount moved into the `apptainer`, `singularity` and `docker` profiles.
 - `nextflow.config`: `unicycler` uses `errorStrategy = 'ignore'`, so a sample that cannot be assembled is reported as `FAIL: no assembly` instead of ending the run.
 - `modules/unicycler.nf`: an assembly with no contigs fails the task rather than passing an empty FASTA to QUAST.
 - `sanibel.nf`: a sample whose QUAST report carries no usable assembly length skips downstream analysis with a warning, keeping `readssum` from dividing by a zero genome size, and is reported as `FAIL: no assembly`.
@@ -76,6 +78,10 @@ General Statistics reports raw and clean read metrics side by side.
 ### Output
 - `modules/candidate_references.nf`: reference genomes no longer published; accession manifest published instead.
 - `modules/skani.nf`: publishes only `_skani.tsv`.
+- Trimmomatic and adapter-trimmed reads are not published; `bbtools/` keeps the clean reads and both stats files.
+- Serotyper results are named per sample: `<id>_legsta.txt`, `<id>_lissero.txt`, `<id>_shigatyper.txt` and `<id>_emm_typing.txt` replace `legsta_output.txt`, `lissero_output.txt`, `shigatyper_output.txt` and `groupAstrep_result.txt`. SerotypeFinder, SeroBA, SeqSero2 and Kleborate also publish a `<id>_<tool>` copy of the file the report reads.
+- `modules/readssum.nf`: read metrics come from `seqkit stats` instead of lyveset, without writing a shuffled copy of the reads. `avg_read_qual` is SeqKit's `AvgQual`, the mean error probability converted back to a Phred score, so it reads lower than the old arithmetic mean.
+- Trimmomatic no longer writes a per-read trim log, and Kraken2 discards its per-read output.
 
 ### Added
 - `modules/lissero.nf`: LisSero serogroup typing for *Listeria monocytogenes*, populating the `serotype` column.
@@ -87,6 +93,9 @@ General Statistics reports raw and clean read metrics side by side.
 - `bin/build_candidate_pool.py`: dropped the unused `sample_id` argument.
 - `sanibel.nf`: added a `rebind()` helper for the repeated re-key / join idiom.
 - `nextflow.config`: process-level `cpus` / `memory` defaults.
+- `bin/sanibel_taxonomy.py`: `read_skani_rows()` and the skani ANI / align fraction cutoffs, shared by `resolve_ec_shigella.py` and `summary_report.py`.
+- `bin/summary_report.py`: one `amr_row()` builds the AMR rows for `amr_report.txt` and the interactive report.
+- `sanibel.nf`: dropped the deprecated `nextflow.enable.dsl` flag.
 
 ### Removed
 BMGAP2 is no longer integrated. CDC no longer maintains it and is developing BMGAP3, so its results risk falling behind or being wrong.

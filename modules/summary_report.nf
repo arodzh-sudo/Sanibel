@@ -3,8 +3,8 @@ process summary_report {
     publishDir { "${params.output}" }, mode: 'copy', pattern: '*report.txt'
 
     input:
-        val  barrier
         val  sample_ids
+        path serotype_files
         path assembly_stats_files
         path read_metrics_files
         path prokka_txt_files
@@ -22,10 +22,7 @@ process summary_report {
         path "*_mqc.tsv",         emit: mqc_tables, optional: true
 
     script:
-    def outdir = params.output
     """
-    summary_report.py \
-        --outdir   "${outdir}" \
-        --samples  ${sample_ids.join(' ')}
+    summary_report.py --samples ${sample_ids.join(' ')}
     """
 }

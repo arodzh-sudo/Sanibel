@@ -5,10 +5,9 @@ process pasty {
     input:
         tuple val(meta), path(assembly)
     output:
-        path("${meta.id}.tsv")
+        tuple val(meta), path("${meta.id}.tsv"), emit: result
         path("${meta.id}.details.tsv")
         path("${meta.id}.blastn.tsv")
-        val meta, emit: done
 
     script:
     """

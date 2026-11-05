@@ -12,15 +12,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from sanibel_taxonomy import (
     genus_of, detect_contamination, extract_contam_candidates,
-    blast16s_top_hit, format_16s,
+    blast16s_top_hit, format_16s, read_skani_rows, SKANI_MIN_ANI, SKANI_MIN_AF,
 )
 
 
 NO_DATA    = 'No data'                       # tool did not run, or its output was missing or unreadable
 NOT_FOUND  = 'Not detected'                  # tool ran and the locus is absent from the assembly
 
-SP_MIN_ANI      = 95.0
-SP_MIN_AF       = 50.0
 SP_REVIEW_ANI   = 94.0
 QC_MIN_COVERAGE = 40.0
 QC_WARN_CONTIGS = 200
@@ -110,50 +108,18 @@ def parse_pmga_prediction(filepath):
     return ''
 
 
-def parse_skani(filepath):
-    EMPTY  = {'ani': 'ANI < 80%', 'confirmed_species': 'Inconclusive', 'align_fraction': NO_DATA, 'reference': NO_DATA}
-    FAILED = {'ani': NO_DATA, 'confirmed_species': NO_DATA, 'align_fraction': NO_DATA, 'reference': NO_DATA}
-    try:
-        rows = []
-        with open(filepath) as f:
-            f.readline()
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split('\t')
-                if len(parts) < 5:
-                    continue
-                try:
-                    ani = float(parts[2])
-                except ValueError:
-                    continue
-                rows.append((ani, parts))
-        if not rows:
-            return EMPTY
-        rows.sort(key=lambda x: x[0], reverse=True)
-        best_ani, best_parts = rows[0]
-        ref_basename = os.path.basename(best_parts[0])
-        if ref_basename.endswith('.fna'):
-            ref_basename = ref_basename[:-4]
-        if '__' in ref_basename:
-            species_part, acc_part = ref_basename.split('__', 1)
-            confirmed_species = species_part if species_part else NO_DATA
-            skani_ref_acc     = acc_part if acc_part else NO_DATA
-        else:
-            confirmed_species = ref_basename if ref_basename else NO_DATA
-            ref_name_col      = best_parts[5].strip() if len(best_parts) > 5 else ''
-            skani_ref_acc     = ref_name_col.split()[0] if ref_name_col else NO_DATA
-        align_fraction = best_parts[4] if len(best_parts) > 4 else NO_DATA
-        return {
-            'ani':               f"{best_ani:.3f}",
-            'confirmed_species': confirmed_species,
-            'align_fraction':    align_fraction,
-            'reference':         skani_ref_acc if skani_ref_acc else NO_DATA,
-        }
-    except Exception as e:
-        print(f"Warning: Could not parse skani TSV {filepath}: {e}", file=sys.stderr)
-        return FAILED
+SKANI_NO_DATA = {'ani': NO_DATA, 'confirmed_species': NO_DATA, 'align_fraction': NO_DATA, 'reference': NO_DATA}
+
+
+def skani_fields(rows, resolved_species):
+    """Best ANI row, or the best row for the ShigaTyper-resolved species when there is one."""
+    row = next((r for r in rows if r.species == resolved_species), None) if resolved_species else None
+    row = row or (rows[0] if rows else None)
+    if row is None:
+        return {'ani': 'ANI < 80%', 'confirmed_species': 'Inconclusive',
+                'align_fraction': NO_DATA, 'reference': NO_DATA}
+    return {'ani': f'{row.ani:.3f}', 'confirmed_species': row.species or NO_DATA,
+            'align_fraction': row.align_fraction, 'reference': row.reference or NO_DATA}
 
 
 def _read_text(path):
@@ -162,45 +128,6 @@ def _read_text(path):
             return f.read().strip()
     except OSError:
         return ''
-
-
-def apply_resolved_species(sk, skani_path, resolved_path):
-    """Re-point the skani fields at the highest-ANI row for the ShigaTyper-resolved species."""
-    try:
-        with open(resolved_path) as f:
-            species = f.read().strip()
-    except OSError:
-        return sk
-    if not species:
-        return sk
-
-    best = None
-    try:
-        with open(skani_path) as f:
-            f.readline()
-            for line in f:
-                parts = line.rstrip('\n').split('\t')
-                if len(parts) < 5:
-                    continue
-                name = os.path.basename(parts[0])
-                if name.endswith('.fna'):
-                    name = name[:-4]
-                if name.split('__', 1)[0] != species:
-                    continue
-                try:
-                    ani = float(parts[2])
-                except ValueError:
-                    continue
-                if best is None or ani > best[0]:
-                    best = (ani, parts[4], name.split('__', 1)[1] if '__' in name else NO_DATA)
-    except OSError:
-        return sk
-    if best is None:
-        return sk
-
-    ani, align_fraction, reference = best
-    return {'ani': f'{ani:.3f}', 'confirmed_species': species,
-            'align_fraction': align_fraction, 'reference': reference}
 
 
 def parse_blast16s_result(filepath):
@@ -308,8 +235,8 @@ def compute_assembly_qc(coverage, num_contigs, n50, min_cov, warn_contigs, fail_
 
 # Per-file parsers - species-specific
 
-def get_ecoli_serotype(sample_dir, sample_id):
-    ecoli_json = os.path.join(sample_dir, 'serotypefinder', 'data.json')
+def get_ecoli_serotype(sample_id):
+    ecoli_json = f'{sample_id}_serotypefinder.json'
     if not os.path.isfile(ecoli_json):
         return None
     try:
@@ -330,9 +257,8 @@ def get_ecoli_serotype(sample_dir, sample_id):
         return NO_DATA
 
 
-def get_klebsiella_serotype(sample_dir, sample_id):
-    matches = sorted(glob.glob(os.path.join(sample_dir, 'kleborate', 'kleborate_out',
-                                            '*_output.txt')))
+def get_klebsiella_serotype(sample_id):
+    matches = sorted(glob.glob(f'{sample_id}_kleborate_*_output.txt'))
     for path in matches:
         try:
             with open(path) as f:
@@ -350,8 +276,8 @@ def get_klebsiella_serotype(sample_dir, sample_id):
     return None
 
 
-def get_legionella_serotype(sample_dir, sample_id):
-    legsta_txt = os.path.join(sample_dir, 'legsta', 'legsta_output.txt')
+def get_legionella_serotype(sample_id):
+    legsta_txt = f'{sample_id}_legsta.txt'
     if not os.path.isfile(legsta_txt):
         return None
     try:
@@ -370,11 +296,8 @@ def get_legionella_serotype(sample_dir, sample_id):
         return None
 
 
-def get_salmonella_serotype(sample_dir, sample_id):
-    salm_dirs = glob.glob(os.path.join(sample_dir, 'seqsero2', 'SeqSero_result_*'))
-    if not salm_dirs:
-        return None
-    salm_tsv = os.path.join(salm_dirs[0], 'SeqSero_result.tsv')
+def get_salmonella_serotype(sample_id):
+    salm_tsv = f'{sample_id}_seqsero2.tsv'
     if not os.path.isfile(salm_tsv):
         return None
     try:
@@ -391,8 +314,8 @@ def get_salmonella_serotype(sample_dir, sample_id):
         return None
 
 
-def get_gas_serotype(sample_dir, sample_id):
-    gas_txt = os.path.join(sample_dir, 'emm_typing', 'groupAstrep_result.txt')
+def get_gas_serotype(sample_id):
+    gas_txt = f'{sample_id}_emm_typing.txt'
     if not os.path.isfile(gas_txt):
         return None
     try:
@@ -412,8 +335,8 @@ def get_gas_serotype(sample_dir, sample_id):
         return None
 
 
-def get_shigella_serotype(sample_dir, sample_id):
-    sh_txt = os.path.join(sample_dir, 'shigatyper', 'shigatyper_output.txt')
+def get_shigella_serotype(sample_id):
+    sh_txt = f'{sample_id}_shigatyper.txt'
     if not os.path.isfile(sh_txt):
         return None
     try:
@@ -431,8 +354,8 @@ def get_shigella_serotype(sample_dir, sample_id):
         return NO_DATA
 
 
-def get_pneumococcal_serotype(sample_dir, sample_id):
-    pred_csv = os.path.join(sample_dir, 'seroba', sample_id, 'pred.csv')
+def get_pneumococcal_serotype(sample_id):
+    pred_csv = f'{sample_id}_seroba.csv'
     if not os.path.isfile(pred_csv):
         return None
     try:
@@ -460,9 +383,9 @@ def _parse_kaptive_txt(filepath):
     return '', ''
 
 
-def get_acinetobacter_serotype(sample_dir, sample_id):
-    k_txt  = os.path.join(sample_dir, 'kaptive_ab', f'{sample_id}_ab_k.txt')
-    oc_txt = os.path.join(sample_dir, 'kaptive_ab', f'{sample_id}_ab_oc.txt')
+def get_acinetobacter_serotype(sample_id):
+    k_txt  = f'{sample_id}_ab_k.txt'
+    oc_txt = f'{sample_id}_ab_oc.txt'
     if not os.path.isfile(k_txt) and not os.path.isfile(oc_txt):
         return None
     try:
@@ -479,9 +402,9 @@ def get_acinetobacter_serotype(sample_dir, sample_id):
         return None
 
 
-def get_vibrio_serotype(sample_dir, sample_id):
-    k_txt = os.path.join(sample_dir, 'kaptive_vp', f'{sample_id}_vp_k.txt')
-    o_txt = os.path.join(sample_dir, 'kaptive_vp', f'{sample_id}_vp_o.txt')
+def get_vibrio_serotype(sample_id):
+    k_txt = f'{sample_id}_vp_k.txt'
+    o_txt = f'{sample_id}_vp_o.txt'
     if not os.path.isfile(k_txt) and not os.path.isfile(o_txt):
         return None
     try:
@@ -498,8 +421,8 @@ def get_vibrio_serotype(sample_dir, sample_id):
         return None
 
 
-def get_pseudomonas_serotype(sample_dir, sample_id):
-    pasty_tsv = os.path.join(sample_dir, 'pasty', f'{sample_id}.tsv')
+def get_pseudomonas_serotype(sample_id):
+    pasty_tsv = f'{sample_id}.tsv'
     if not os.path.isfile(pasty_tsv):
         return None
     try:
@@ -513,8 +436,8 @@ def get_pseudomonas_serotype(sample_dir, sample_id):
         return None
 
 
-def get_listeria_serotype(sample_dir, sample_id):
-    liss_txt = os.path.join(sample_dir, 'lissero', 'lissero_output.txt')
+def get_listeria_serotype(sample_id):
+    liss_txt = f'{sample_id}_lissero.txt'
     if not os.path.isfile(liss_txt):
         return None
     try:
@@ -615,20 +538,23 @@ def emit_sanibel_mqc_tables(rows_std):
     )
 
 
+def amr_row(sid, amr):
+    if amr is None:
+        return [sid, NO_DATA, NO_DATA, NO_DATA, NO_DATA]
+    genes = amr['genes']
+    if not genes:
+        return [sid, 'None', 'None', 'None', 'None']
+    return [sid, carbapenemase_family(genes), amr_target_genes(genes),
+            ', '.join(genes), ', '.join(amr['subclasses']) or 'None']
+
+
 def emit_sanibel_amr_mqc_table(amr_by_sample):
     if not amr_by_sample:
         return
     rows = []
     for sid, amr in amr_by_sample.items():
-        if amr is None:
-            rows.append([sid, NO_DATA, NO_DATA, NO_DATA, NO_DATA, NO_DATA])
-        elif not amr['genes']:
-            rows.append([sid, 'None', 'None', 0, 'None', 'None'])
-        else:
-            rows.append([sid, carbapenemase_family(amr['genes']),
-                         amr_target_genes(amr['genes']), len(amr['genes']),
-                         ', '.join(amr['genes']),
-                         ', '.join(amr['subclasses']) or 'None'])
+        row = amr_row(sid, amr)
+        rows.append(row[:3] + [NO_DATA if amr is None else len(amr['genes'])] + row[3:])
     _write_mqc(
         'sanibel_amr_mqc.tsv',
         _mqc_preamble(
@@ -646,11 +572,9 @@ def emit_sanibel_amr_mqc_table(amr_by_sample):
 
 def main():
     parser = argparse.ArgumentParser(description='Build Sanibel summary reports.')
-    parser.add_argument('--outdir',          required=True, help='Pipeline output directory')
     parser.add_argument('--samples', nargs='+', required=True, help='Every submitted sample ID')
     args = parser.parse_args()
 
-    outdir  = args.outdir
     samples = sorted(set(args.samples))
 
     rows_std = []
@@ -662,8 +586,6 @@ def main():
                             + [NO_DATA] * (len(HEADER_STANDARD) - 4))
             continue
 
-        sample_dir = os.path.join(outdir, sid)
-
         amr_by_sample[sid] = parse_amrfinder(f'{sid}_amrfinderplus_report.tsv')
 
         asm  = parse_assembly_stats(f'{sid}_assembly_stats.txt')
@@ -672,10 +594,10 @@ def main():
         mlst = parse_mlst(f'{sid}.mlst')
         kr   = parse_kraken_report(f'{sid}.report')
 
-        _sk_empty = {'ani': NO_DATA, 'confirmed_species': NO_DATA, 'align_fraction': NO_DATA, 'reference': NO_DATA}
         skani_path = f'{sid}_skani.tsv'
-        sk = parse_skani(skani_path) if os.path.isfile(skani_path) else _sk_empty
-        sk = apply_resolved_species(sk, skani_path, f'{sid}_species_resolved.txt')
+        resolved   = _read_text(f'{sid}_species_resolved.txt')
+        sk = (skani_fields(read_skani_rows(skani_path), resolved)
+              if os.path.isfile(skani_path) else SKANI_NO_DATA)
 
         skani_ID_val     = sk['confirmed_species']
         skani_ANI_val    = sk['ani']
@@ -702,31 +624,31 @@ def main():
             serotype = NO_DATA
             # Both serotypers run for the E. coli/Shigella complex, so the genus picks the winner
             complex_getters = [
-                lambda: get_ecoli_serotype(sample_dir, sid),
-                lambda: get_shigella_serotype(sample_dir, sid),
+                lambda: get_ecoli_serotype(sid),
+                lambda: get_shigella_serotype(sid),
             ]
             if skani_genus == 'Shigella':
                 complex_getters.reverse()
             for getter in complex_getters + [
-                lambda: get_klebsiella_serotype(sample_dir, sid),
-                lambda: get_legionella_serotype(sample_dir, sid),
-                lambda: get_salmonella_serotype(sample_dir, sid),
-                lambda: get_gas_serotype(sample_dir, sid),
-                lambda: get_pneumococcal_serotype(sample_dir, sid),
-                lambda: get_acinetobacter_serotype(sample_dir, sid),
-                lambda: get_vibrio_serotype(sample_dir, sid),
-                lambda: get_pseudomonas_serotype(sample_dir, sid),
-                lambda: get_listeria_serotype(sample_dir, sid),
+                lambda: get_klebsiella_serotype(sid),
+                lambda: get_legionella_serotype(sid),
+                lambda: get_salmonella_serotype(sid),
+                lambda: get_gas_serotype(sid),
+                lambda: get_pneumococcal_serotype(sid),
+                lambda: get_acinetobacter_serotype(sid),
+                lambda: get_vibrio_serotype(sid),
+                lambda: get_pseudomonas_serotype(sid),
+                lambda: get_listeria_serotype(sid),
             ]:
                 result = getter()
                 if result is not None:
                     serotype = result
                     break
 
-        species_id_qc = compute_id_qc(sk, SP_MIN_ANI, SP_MIN_AF, SP_REVIEW_ANI)
+        species_id_qc = compute_id_qc(sk, SKANI_MIN_ANI, SKANI_MIN_AF, SP_REVIEW_ANI)
         # ANI cannot separate E. coli from Shigella, so an unresolved complex call is not confirmed
         in_complex = skani_ID_val == 'Escherichia_coli' or skani_genus == 'Shigella'
-        if species_id_qc == 'PASS' and in_complex                 and not _read_text(f'{sid}_species_resolved.txt'):
+        if species_id_qc == 'PASS' and in_complex and not resolved:
             species_id_qc = 'REVIEW (E. coli/Shigella unresolved)'
         contaminated = contamination_flag not in ('None', 'Not screened', NO_DATA)
         assembly_qc = compute_assembly_qc(
@@ -754,17 +676,7 @@ def main():
                 fh.write('\t'.join(str(v).replace(',', ';') for v in row) + '\n')
         print(f"summary_report.py: wrote {path} ({len(rows)} sample(s))")
 
-    rows_amr = []
-    for sid, amr in amr_by_sample.items():
-        if amr is None:
-            rows_amr.append([sid, NO_DATA, NO_DATA, NO_DATA, NO_DATA])
-        elif not amr['genes']:
-            rows_amr.append([sid, 'None', 'None', 'None', 'None'])
-        else:
-            rows_amr.append([sid, carbapenemase_family(amr['genes']),
-                             amr_target_genes(amr['genes']),
-                             ', '.join(amr['genes']),
-                             ', '.join(amr['subclasses']) or 'None'])
+    rows_amr = [amr_row(sid, amr) for sid, amr in amr_by_sample.items()]
 
     write_report('sum_report.txt', HEADER_STANDARD, rows_std)
     if rows_amr:

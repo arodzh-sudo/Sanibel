@@ -5,11 +5,10 @@ process lissero {
     input:
         tuple val(meta), path(assembly)
     output:
-        path("lissero_output.txt")
-        val meta, emit: done
+        tuple val(meta), path("${meta.id}_lissero.txt"), emit: result
 
     script:
     """
-    lissero ${assembly} > lissero_output.txt
+    lissero ${assembly} > ${meta.id}_lissero.txt
     """
 }

@@ -6,8 +6,7 @@ process kaptive {
         tuple val(meta), path(assembly)
         val variant
     output:
-        path("${meta.id}_${variant}_*.txt")
-        val meta, emit: done
+        tuple val(meta), path("${meta.id}_${variant}_*.txt"), emit: result
 
     script:
     def cfg = [

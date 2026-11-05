@@ -1,6 +1,5 @@
 process trimmomatic {
     tag "${meta.id}"
-    publishDir { "${params.output}/${meta.id}/trimmomatic" }, mode: 'copy'
 
     input:
         tuple val(meta), path(reads)
@@ -11,7 +10,6 @@ process trimmomatic {
     def prefix = meta.id
     """
     trimmomatic PE -threads ${task.cpus} -phred33 \\
-        -trimlog ${prefix}.log \\
         ${reads[0]} ${reads[1]} \\
         ${prefix}_trim_1.fastq.gz ${prefix}_unpaired_trim_1.fastq.gz \\
         ${prefix}_trim_2.fastq.gz ${prefix}_unpaired_trim_2.fastq.gz \\

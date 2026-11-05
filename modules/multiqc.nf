@@ -18,22 +18,22 @@ process multiqc_global {
     publishDir { "${params.output}" }, mode: 'copy'
 
     input:
-        path summary
         val  version
         path multiqc_config, stageAs: 'multiqc_config.template.yaml'
         path custom_logo
         path custom_css
         path nf_config
-        path mqc_tables, stageAs: 'mqc_in/*'
+        path mqc_tables
+        path fastqc_raw,   stageAs: 'fastqc/*'
+        path fastqc_clean, stageAs: 'fastqc2/*'
+        path quast_reports, stageAs: 'quast???/*'
+        path prokka_txt,   stageAs: 'prokka/*'
 
     output:
         path("sanibel_report.html"), emit: report
 
     script:
     """
-    mkdir -p mqc_in
-    cp mqc_in/*_mqc.tsv ${params.output}/ 2>/dev/null || true
-
     {
       echo "# id: 'sanibel_versions'"
       echo "# section_name: 'Software Versions'"
@@ -49,23 +49,16 @@ process multiqc_global {
       echo "#         scale: false"
       echo "#         format: '{}'"
       printf 'Software\\tVersion\\n'
-      grep -hoE "docker://[^']+" ${nf_config} \\
-        | sed -E 's#docker://[^/]*/([^:]+):(.+)#\\1\\t\\2#' \\
+      grep -hoE "staphb/[^']+" ${nf_config} \\
+        | sed -E 's#staphb/([^:]+):(.+)#\\1\\t\\2#' \\
         | sort -u
-    } > "${params.output}/sanibel_versions_mqc.tsv"
+    } > sanibel_versions_mqc.tsv
 
     sed 's/@SANIBEL_VERSION@/${version}/' ${multiqc_config} > multiqc_config.yaml
 
-    multiqc ${params.output} \\
+    multiqc . \\
         -c multiqc_config.yaml \\
         --filename sanibel_report.html \\
-        --interactive \\
-        --ignore "*/multiqc/*" \\
-        --ignore "*/pipeline_info/*" \\
-        --ignore "*/emm_typing/*" \\
-        --ignore "*sanibel_report*" \\
-        --ignore "*report.txt"
-
-    rm -f "${params.output}"/*_mqc.tsv
+        --interactive
     """
 }

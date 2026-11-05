@@ -6,10 +6,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from sanibel_taxonomy import genus_of
-
-MIN_ANI = 95.0
-MIN_AF  = 50.0
+from sanibel_taxonomy import genus_of, read_skani_rows, SKANI_MIN_ANI, SKANI_MIN_AF
 
 
 def read_prediction(path):
@@ -39,29 +36,17 @@ def resolve_target(prediction):
     return None, None
 
 
-def read_skani(path):
-    rows = []
-    with open(path) as f:
-        f.readline()
-        for line in f:
-            parts = line.rstrip('\n').split('\t')
-            if len(parts) < 5:
-                continue
-            try:
-                ani = float(parts[2])
-                af  = float(parts[4])
-            except ValueError:
-                continue
-            if ani < MIN_ANI or af < MIN_AF:
-                continue
-            name = os.path.basename(parts[0])
-            if name.endswith('.fna'):
-                name = name[:-4]
-            species = name.split('__', 1)[0]
-            if species:
-                rows.append((ani, species))
-    rows.sort(key=lambda r: r[0], reverse=True)
-    return rows
+def passing_species(path):
+    """Species of the skani rows that clear the ANI and align fraction cutoffs, best first."""
+    species = []
+    for r in read_skani_rows(path):
+        try:
+            af = float(r.align_fraction)
+        except ValueError:
+            continue
+        if r.species and r.ani >= SKANI_MIN_ANI and af >= SKANI_MIN_AF:
+            species.append(r.species)
+    return species
 
 
 def main():
@@ -71,26 +56,27 @@ def main():
     ap.add_argument('--prefix',     required=True)
     args = ap.parse_args()
 
-    rows       = read_skani(args.skani)
+    rows       = passing_species(args.skani)
     prediction = read_prediction(args.shigatyper)
     genus, named_species = resolve_target(prediction)
 
     resolved = ''
     if not rows:
-        print(f'resolve_ec_shigella: no skani row clears {MIN_ANI}/{MIN_AF}', file=sys.stderr)
+        print(f'resolve_ec_shigella: no skani row clears {SKANI_MIN_ANI}/{SKANI_MIN_AF}',
+              file=sys.stderr)
     elif genus is None:
         print(f"resolve_ec_shigella: ShigaTyper prediction '{prediction}' is not usable, "
-              f'keeping {rows[0][1]}', file=sys.stderr)
+              f'keeping {rows[0]}', file=sys.stderr)
     else:
-        pick = next((sp for _ani, sp in rows if sp == named_species), None) \
-            or next((sp for _ani, sp in rows if genus_of(sp) == genus), None)
+        pick = next((sp for sp in rows if sp == named_species), None) \
+            or next((sp for sp in rows if genus_of(sp) == genus), None)
         if pick is None:
             print(f'resolve_ec_shigella: ShigaTyper says {genus} but no {genus} reference '
-                  f'clears {MIN_ANI}/{MIN_AF}, keeping {rows[0][1]}', file=sys.stderr)
+                  f'clears {SKANI_MIN_ANI}/{SKANI_MIN_AF}, keeping {rows[0]}', file=sys.stderr)
         else:
             resolved = pick
-            if pick != rows[0][1]:
-                print(f"resolve_ec_shigella: {rows[0][1]} -> {pick} on ShigaTyper '{prediction}'",
+            if pick != rows[0]:
+                print(f"resolve_ec_shigella: {rows[0]} -> {pick} on ShigaTyper '{prediction}'",
                       file=sys.stderr)
 
     with open(f'{args.prefix}_species_resolved.txt', 'w') as fh:

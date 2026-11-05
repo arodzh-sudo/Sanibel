@@ -5,11 +5,10 @@ process shigatyper {
     input:
         tuple val(meta), path(reads)
     output:
-        tuple val(meta), path("shigatyper_output.txt"), emit: result
-        val meta, emit: done
+        tuple val(meta), path("${meta.id}_shigatyper.txt"), emit: result
 
     script:
     """
-    shigatyper --R1 ${reads[0]} --R2 ${reads[1]} > shigatyper_output.txt
+    shigatyper --R1 ${reads[0]} --R2 ${reads[1]} > ${meta.id}_shigatyper.txt
     """
 }

@@ -1,6 +1,6 @@
 process bbtools_adapters {
     tag "${meta.id}"
-    publishDir { "${params.output}/${meta.id}/bbtools" }, mode: 'copy'
+    publishDir { "${params.output}/${meta.id}/bbtools" }, mode: 'copy', pattern: '*_adapter_stats.txt'
 
     input:
         tuple val(meta), path(trimmed_reads)

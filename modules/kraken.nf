@@ -15,7 +15,7 @@ process kraken {
         --threads ${task.cpus} \\
         --use-names \\
         --report ${prefix}.report \\
-        --output ${prefix}_kraken.out \\
+        --output /dev/null \\
         --paired ${reads[0]} ${reads[1]}
     """
 }

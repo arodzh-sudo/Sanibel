@@ -6,10 +6,11 @@ process serotypefinder {
         tuple val(meta), path(reads)
     output:
         path("data.json")
-        val meta, emit: done
+        tuple val(meta), path("${meta.id}_serotypefinder.json"), emit: result
 
     script:
     """
     serotypefinder.py -i ${reads[0]} ${reads[1]} -o ./
+    cp data.json ${meta.id}_serotypefinder.json
     """
 }

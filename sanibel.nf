@@ -7,8 +7,6 @@
   Email: bphl-sebioinformatics@flhealth.gov 
 */
 
-nextflow.enable.dsl = 2
-
 include { fastqc }                from './modules/fastqc.nf'
 include { trimmomatic }           from './modules/trimmomatic.nf'
 include { bbtools_adapters }      from './modules/bbtools.nf'
@@ -79,6 +77,7 @@ workflow {
         def meta = [ id: clean_id, single_end: false ]
         [ meta, files ]
     }
+    .ifEmpty { error "No FASTQ pairs found in ${params.input}" }
 
     ch_mlst_schemes = channel.value(file("${projectDir}/assets/mlst_schemes.tsv", checkIfExists: true))
 
@@ -98,10 +97,7 @@ workflow {
     multiqc(
         ch_fastqc.report
             .join(ch_fastqc2.report, by: 0)
-            .map { meta, raw_reports, clean_reports ->
-                [meta, (raw_reports instanceof List ? raw_reports : [raw_reports]) +
-                       (clean_reports instanceof List ? clean_reports : [clean_reports])]
-            }
+            .map { meta, raw_reports, clean_reports -> [ meta, raw_reports + clean_reports ] }
     )
 
     // Species ID, assembly and read classification
@@ -247,20 +243,19 @@ workflow {
     kaptive_vp(ch_assembly_typed.filter  { meta, _a -> meta.species == 'Vibrio_parahaemolyticus' }, 'vp')
     lissero(ch_assembly_typed.filter     { meta, _a -> meta.species == 'Listeria_monocytogenes' })
 
-    ch_optional_barrier =
-        legsta.out.done
-            .mix(kleborate.out.done, shigatyper.out.done, emm_typing.out.done,
-                 seqsero2.out.done, serotypefinder.out.done, plasmidfinder.out.done,
-                 seroba.out.done, pasty.out.done, kaptive_ab.out.done, kaptive_vp.out.done,
-                 lissero.out.done)
-            .map { _id -> 1 }
+    ch_serotypes =
+        legsta.out.result
+            .mix(kleborate.out.result, shigatyper.out.result, emm_typing.out.result,
+                 seqsero2.out.result, serotypefinder.out.result, seroba.out.result,
+                 pasty.out.result, kaptive_ab.out.result, kaptive_vp.out.result,
+                 lissero.out.result)
+            .map { _meta, f -> f }
             .collect()
-            .map { _ids -> true }
-            .ifEmpty(true)
+            .ifEmpty([])
 
     ch_summary = summary_report(
-        ch_optional_barrier,
         ch_reads.map { meta, _files -> meta.id }.collect(),
+        ch_serotypes,
         ch_stats.map { _meta, stats -> stats }.collect().ifEmpty([]),
         ch_readssum.out.map         { _meta, rm   -> rm   }.collect().ifEmpty([]),
         ch_prokka.cds_txt.map       { _meta, ptxt -> ptxt }.collect().ifEmpty([]),
@@ -275,13 +270,16 @@ workflow {
 
     // Run-level interactive MultiQC across all samples
     multiqc_global(
-        ch_summary.summary,
         channel.value(workflow.manifest.version),
         channel.value(file("${projectDir}/assets/multiqc_config.yaml",         checkIfExists: true)),
         channel.value(file("${projectDir}/assets/sanibel_pipeline_logo_v2.png", checkIfExists: true)),
         channel.value(file("${projectDir}/assets/sanibel_report.css",           checkIfExists: true)),
         channel.value(file("${projectDir}/nextflow.config",                     checkIfExists: true)),
-        ch_summary.mqc_tables.ifEmpty([])
+        ch_summary.mqc_tables.ifEmpty([]),
+        ch_fastqc.report.map  { _meta, f -> f }.collect().ifEmpty([]),
+        ch_fastqc2.report.map { _meta, f -> f }.collect().ifEmpty([]),
+        ch_quast.report.map   { _meta, f -> f }.collect().ifEmpty([]),
+        ch_prokka.cds_txt.map { _meta, f -> f }.collect().ifEmpty([])
     )
 
     // An ignored task or an inner join drops a sample without failing the run, so reconcile

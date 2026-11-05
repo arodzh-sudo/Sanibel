@@ -6,12 +6,13 @@ process seroba {
         tuple val(meta), path(reads)
     output:
         path("${meta.id}/pred.csv")
-        val meta, emit: done
+        tuple val(meta), path("${meta.id}_seroba.csv"), emit: result
 
     script:
     """
     ln -s ${reads[0]} ${meta.id}_1.fastq.gz
     ln -s ${reads[1]} ${meta.id}_2.fastq.gz
     seroba runSerotyping /seroba/database/ ${meta.id}_1.fastq.gz ${meta.id}_2.fastq.gz ${meta.id}
+    cp ${meta.id}/pred.csv ${meta.id}_seroba.csv
     """
 }

@@ -5,11 +5,10 @@ process legsta {
     input:
         tuple val(meta), path(assembly)
     output:
-        path("legsta_output.txt")
-        val meta, emit: done
+        tuple val(meta), path("${meta.id}_legsta.txt"), emit: result
 
     script:
     """
-    legsta ${assembly} > legsta_output.txt
+    legsta ${assembly} > ${meta.id}_legsta.txt
     """
 }
