@@ -16,8 +16,8 @@ from sanibel_taxonomy import (
 )
 
 
-NO_DATA    = 'No data'                       # tool did not run, or its output was missing or unreadable
-NOT_FOUND  = 'Not detected'                  # tool ran and the locus is absent from the assembly
+NO_DATA    = 'No data' # tool did not run, or its output was missing or unreadable
+NOT_FOUND  = 'Not detected' # tool ran and the locus is absent from the assembly
 
 SP_REVIEW_ANI   = 94.0
 QC_MIN_COVERAGE = 40.0
@@ -27,7 +27,6 @@ QC_MIN_N50      = 15000
 
 
 def pmga_serotyped(skani_species):
-    """Keyed on species, never the MLST scheme: mlst maps the whole Neisseria genus to 'neisseria'."""
     key = (skani_species or '').strip().replace(' ', '_').lower()
     return key.startswith(('neisseria_meningitidis', 'haemophilus_influenzae'))
 
@@ -112,7 +111,6 @@ SKANI_NO_DATA = {'ani': NO_DATA, 'confirmed_species': NO_DATA, 'align_fraction':
 
 
 def skani_fields(rows, resolved_species):
-    """Best ANI row, or the best row for the ShigaTyper-resolved species when there is one."""
     row = next((r for r in rows if r.species == resolved_species), None) if resolved_species else None
     row = row or (rows[0] if rows else None)
     if row is None:
@@ -370,7 +368,6 @@ def get_pneumococcal_serotype(sample_id):
 
 
 def _parse_kaptive_txt(filepath):
-    """Return (locus, type) from a kaptive v3 TSV output file."""
     try:
         with open(filepath) as f:
             reader = csv.DictReader(f, delimiter='\t')
@@ -456,10 +453,10 @@ def get_listeria_serotype(sample_id):
 HEADER_STANDARD = [
     'sampleID',
     'species_id_qc', 'contamination_flag', 'assembly_qc',
+    'skani_species', 'skani_ani', 'skani_align_fraction', 'skani_reference',
     'mash_species', 'mash_reference', 'mash_distance',
     'kraken2_species', 'kraken2_percent',
     'blast_16s_tophit', 'blast_16s_pident',
-    'skani_species', 'skani_ani', 'skani_align_fraction', 'skani_reference',
     'serotype', 'mlst_scheme', 'mlst_st',
     'num_clean_reads', 'avg_read_length', 'avg_read_qual', 'est_coverage',
     'num_contigs', 'longest_contig', 'N50', 'L50', 'total_length', 'gc_content',
@@ -471,15 +468,16 @@ HEADER_AMR = ['sampleID', 'carbapenemase_family', 'amr_target',
 
 # MultiQC custom-content emitters
 
-MQC_SPECIES_COLS   = [0, 11, 12, 13, 1, 2, 3]
 MQC_SPECIES_HEADER = ['Sample', 'skani_species', 'skani_ani', 'skani_align_fraction',
                       'species_id_qc', 'contamination_flag', 'assembly_qc']
-
-MQC_TYPING_COLS    = [0, 16, 17, 15]
 MQC_TYPING_HEADER  = ['Sample', 'mlst_scheme', 'mlst_st', 'serotype']
 
 MQC_AMR_HEADER     = ['Sample', 'carbapenemase_family', 'amr_target',
                       'amr_gene_count', 'amr_genes', 'amr_subclass']
+
+
+def std_cols(mqc_header):
+    return [0] + [HEADER_STANDARD.index(c) for c in mqc_header[1:]]
 
 
 def _mqc_preamble(section_id, section_name, description, pconfig=None, headers=None):
@@ -523,7 +521,7 @@ def emit_sanibel_mqc_tables(rows_std):
             pconfig={'id': 'sanibel_species_table', 'col1_header': 'Sample',
                      'no_violin': True},
         ),
-        MQC_SPECIES_HEADER, MQC_SPECIES_COLS, rows_std,
+        MQC_SPECIES_HEADER, std_cols(MQC_SPECIES_HEADER), rows_std,
     )
     _write_mqc(
         'sanibel_typing_mqc.tsv',
@@ -534,7 +532,7 @@ def emit_sanibel_mqc_tables(rows_std):
                      'no_violin': True, 'only_defined_headers': False},
             headers={'mlst_st': {'scale': False, 'format': '{}'}},
         ),
-        MQC_TYPING_HEADER, MQC_TYPING_COLS, rows_std,
+        MQC_TYPING_HEADER, std_cols(MQC_TYPING_HEADER), rows_std,
     )
 
 
@@ -620,9 +618,7 @@ def main():
         if pmga_serotyped(skani_ID_val):
             serotype = parse_pmga_prediction(f'{sid}sta.txt') or NO_DATA
         else:
-            # Species-specific serotype from published output dirs
             serotype = NO_DATA
-            # Both serotypers run for the E. coli/Shigella complex, so the genus picks the winner
             complex_getters = [
                 lambda: get_ecoli_serotype(sid),
                 lambda: get_shigella_serotype(sid),
@@ -646,7 +642,6 @@ def main():
                     break
 
         species_id_qc = compute_id_qc(sk, SKANI_MIN_ANI, SKANI_MIN_AF, SP_REVIEW_ANI)
-        # ANI cannot separate E. coli from Shigella, so an unresolved complex call is not confirmed
         in_complex = skani_ID_val == 'Escherichia_coli' or skani_genus == 'Shigella'
         if species_id_qc == 'PASS' and in_complex and not resolved:
             species_id_qc = 'REVIEW (E. coli/Shigella unresolved)'
@@ -658,10 +653,10 @@ def main():
         std_row = [
             sid,
             species_id_qc, contamination_flag, assembly_qc,
+            skani_ID_val, skani_ANI_val, skani_align_val, skani_ID_ref_val,
             f"{asm['genus']}_{asm['species']}", asm['accession'], asm['mash_distance'],
             kr['species'], kr['percent'],
             blast16s_result['tophit'], blast16s_result['pident'],
-            skani_ID_val, skani_ANI_val, skani_align_val, skani_ID_ref_val,
             serotype, scheme, mlst['st'],
             rm['num_reads'], rm['avg_read_len'], rm['avg_qual'], rm['coverage'],
             asm['num_contigs'], asm['longest_contig'], asm['n50'], asm['l50'],

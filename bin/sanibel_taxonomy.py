@@ -131,7 +131,6 @@ SkaniRow = namedtuple('SkaniRow', 'ani align_fraction species reference')
 
 
 def read_skani_rows(path):
-    """skani dist rows, highest ANI first. References are named <species>__<accession>.fna."""
     rows = []
     try:
         fh = open(path)

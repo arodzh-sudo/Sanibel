@@ -37,7 +37,6 @@ def resolve_target(prediction):
 
 
 def passing_species(path):
-    """Species of the skani rows that clear the ANI and align fraction cutoffs, best first."""
     species = []
     for r in read_skani_rows(path):
         try:

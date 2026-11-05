@@ -19,7 +19,6 @@ process unicycler {
 
     mv assembly/assembly.fasta ${prefix}.fasta
 
-    # An empty assembly moves cleanly and satisfies the path output, so fail here instead
     if ! grep -q '^>' ${prefix}.fasta; then
         echo "unicycler: ${prefix} assembled no contigs" >&2
         exit 1

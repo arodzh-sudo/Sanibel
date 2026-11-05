@@ -24,8 +24,8 @@ process multiqc_global {
         path custom_css
         path nf_config
         path mqc_tables
-        path fastqc_raw,   stageAs: 'fastqc/*'
-        path fastqc_clean, stageAs: 'fastqc2/*'
+        path fastqc_raw
+        path fastqc_clean
         path quast_reports, stageAs: 'quast???/*'
         path prokka_txt,   stageAs: 'prokka/*'
 

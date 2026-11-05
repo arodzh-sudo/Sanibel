@@ -161,7 +161,7 @@ All results are written to `params.output/<sample_id>/`. Two summary files are w
 
 | File | Samples | Cols | Key fields |
 |------|---------|------|------------|
-| `sum_report.txt` | All | 29 | ID · species (skani ANI, Mash, Kraken) · 16S top hit · skani ANI/reference · species-ID QC · contamination flag · MLST scheme/ST · serotype · QC metrics (reads, coverage, assembly stats, GC, CDS) · assembly QC |
+| `sum_report.txt` | All | 29 | ID · species-ID QC · contamination flag · assembly QC · skani species/ANI/reference · Mash · Kraken2 · 16S top hit · serotype · MLST scheme/ST · QC metrics (reads, coverage, assembly stats, GC, CDS) |
 | `amr_report.txt` | All | 5 | ID · carbapenemase family · matched target genes · AMR genes · AMR subclasses |
 
 Report values use a fixed vocabulary. A value is never blank, and only one of these means the answer is negative:

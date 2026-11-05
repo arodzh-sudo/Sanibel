@@ -282,7 +282,6 @@ workflow {
         ch_prokka.cds_txt.map { _meta, f -> f }.collect().ifEmpty([])
     )
 
-    // An ignored task or an inner join drops a sample without failing the run, so reconcile
     ch_summary.summary
         .map    { rpt ->
             def rows = rpt.readLines('UTF-16').drop(1)

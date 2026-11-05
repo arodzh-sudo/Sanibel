@@ -37,6 +37,7 @@ ANI cannot separate the complex, so ShigaTyper picks the genus and skani names t
 
 ### Report columns
 - New: `blast_16s_tophit`, `blast_16s_pident`, `skani_species`, `skani_ani`, `skani_align_fraction`, `skani_reference`, `contamination_flag`.
+- The skani columns follow the three QC columns, ahead of the Mash, Kraken2 and 16S evidence.
 - `species_id_qc` (col 2): `PASS` / `REVIEW (borderline ANI)` / `NO ID (ANI < 95%)`.
 - `assembly_qc` (col 4): `PASS` / `Warning:` / `FAIL:` from coverage, contigs, N50 and contamination. A FAIL lists every failing reason, such as `FAIL: coverage <40x; contamination`.
 - A sample that did not assemble still gets a `sum_report.txt` row: `assembly_qc` is `FAIL: no assembly` and every other cell is `No data`.
@@ -59,7 +60,7 @@ AMR results live in their own file rather than as trailing columns of the standa
 ### Interactive report
 General Statistics reports raw and clean read metrics side by side.
 
-- `assets/multiqc_config.yaml`: second `fastqc` module instance anchored `fastqc_raw`, filtered to `*/fastqc/*`. All twelve of its sections are removed, so it contributes general-statistics columns only.
+- `assets/multiqc_config.yaml`: second `fastqc` module instance anchored `fastqc_raw`, filtered to `*_original_fastqc.zip` (the clean instance to `*_clean_fastqc.zip`). All twelve of its sections are removed, so it contributes general-statistics columns only.
 - Sequence count, GC and median read length are forced visible for both instances. `median_sequence_length` hides itself when every sample falls within 10 bp, which is why it never appeared before.
 - `modules/fastqc.nf`: raw reads are linked to `<id>_R{1,2}.fastq.gz` before FastQC runs. MultiQC names samples from the `Filename` recorded inside `fastqc_data.txt`, so raw and clean have to share a stem to land on one row.
 - `modules/multiqc.nf`: `multiqc_global` builds the report from the FastQC, QUAST and Prokka outputs and the summary tables staged into its work directory. It no longer scans or writes into the output directory.

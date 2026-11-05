@@ -45,7 +45,6 @@ process candidate_references {
         safe_name=\$(echo "\${species}" | tr ' ' '_')
         workdir="dl_\${safe_name}"
 
-        # 1. Non-zero exit is an NCBI failure; clean exit with no accessions means the species has none
         if retry_ncbi datasets summary genome taxon "\${species}" \\
                 --assembly-source refseq \\
                 --limit "\${N_REFS}" \\
@@ -59,13 +58,11 @@ process candidate_references {
             return 0
         fi
 
-        # 2. Always include the sketch representative
         if [ "\${accession}" != "NA" ] && [ -n "\${accession}" ]; then
             acc_list=\$(printf '%s\\n%s\\n' "\${acc_list}" "\${accession}")
         fi
         acc_list=\$(printf '%s\\n' "\${acc_list}" | grep -oE 'GC[FA]_[0-9]+\\.[0-9]+' | sort -u || true)
 
-        # 3. Download the selected accessions in a single call and split per accession
         if [ -n "\${acc_list}" ]; then
             if retry_ncbi datasets download genome accession \${acc_list} \\
                     --include genome \\
@@ -80,7 +77,6 @@ process candidate_references {
             rm -rf "\${workdir}.zip" "\${workdir}_dir" 2>/dev/null || true
         fi
 
-        # 4. Last-resort fallback (summary/download produced nothing): old reference path
         if ! ls "\${REF_DIR}/\${safe_name}__"*.fna >/dev/null 2>&1; then
             echo "candidate_references: reference fallback for \${species}, expect one genome only" >&2
             refwork="ref_\${safe_name}"
@@ -105,7 +101,6 @@ process candidate_references {
         [ -n "\${species}" ] && printf '%s\\0%s\\0' "\${species}" "\${accession}"
     done | xargs -0 -n 2 -P 2 bash -c 'download_candidate "\$0" "\$1"'
 
-    # Manifest of the references skani will use (record only; the genomes themselves are not published)
     ls ${prefix}_references/*.fna 2>/dev/null | xargs -r -n1 basename \\
         | sed 's/\\.fna\$//; s/__/_/' | sort > ${prefix}_reference_genomes.txt
 
@@ -119,7 +114,6 @@ process candidate_references {
         fi
     fi
 
-    # Fail the process only when no references were downloaded at all
     n_downloaded=\$(find ${prefix}_references -name "*.fna" | wc -l)
     [ "\${n_downloaded}" -gt 0 ] || { echo "No reference genomes downloaded for ${prefix}" >&2; exit 1; }
     """

@@ -36,12 +36,12 @@ module_order:
       name: "FastQC (raw reads)"
       anchor: "fastqc_raw"
       path_filters:
-        - "*/fastqc/*"
+        - "*_original_fastqc.zip"
   - fastqc:
       name: "FastQC (clean reads)"
       anchor: "fastqc_clean"
       path_filters:
-        - "*/fastqc2/*"
+        - "*_clean_fastqc.zip"
 
 remove_sections:
   - "fastqc_raw_fastqc_sequence_counts"
