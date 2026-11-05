@@ -43,8 +43,8 @@ ANI cannot separate the complex, so ShigaTyper picks the genus and skani names t
 - Kraken2 columns renamed `kraken2_species` / `kraken2_percent`; output moved to `<sample>/kraken2/`.
 - AMR columns renamed `amr_gene_symbol` / `amr_subclass`.
 - QC thresholds are hardcoded constants, not `nextflow.config` params.
-- Multi-value cells use `;` as the separator in all four text reports; no cell contains a comma. Affects `serotype` for Salmonella, Legionella and Listeria, and the AMR gene and subclass lists. The interactive report keeps comma-separated lists.
-- All four text reports are written as UTF-16LE with a BOM and CRLF line endings, so Excel splits columns on open and keeps non-ASCII values such as `OL2α.1`. Read them on the command line with `iconv -f UTF-16 -t UTF-8`, or in pandas with `encoding='utf-16'`.
+- Multi-value cells use `;` as the separator in both text reports; no cell contains a comma. Affects `serotype` for Salmonella, Legionella and Listeria, and the AMR gene and subclass lists. The interactive report keeps comma-separated lists.
+- Both text reports are written as UTF-16LE with a BOM and CRLF line endings, so Excel splits columns on open and keeps non-ASCII values such as `OL2α.1`. Read them on the command line with `iconv -f UTF-16 -t UTF-8`, or in pandas with `encoding='utf-16'`.
 
 ### AMR report
 AMR results live in their own file rather than as trailing columns of the standard report.
@@ -73,16 +73,6 @@ General Statistics reports raw and clean read metrics side by side.
 - `sanibel.nf`: the run summary warns with the count of `FAIL: no assembly` samples.
 - `nextflow.config`: `manifest.version` holds the release version. The startup banner prints it and the interactive report header reads it at run time.
 
-### BMGAP2 resume
-- `modules/bmgap2_amr.nf`: takes the PMGA BLAST JSON as a staged `path` input instead of reading `${params.output}/<id>/pmga`.
-- `modules/bmgap2_locusextractor.nf`, `modules/bmgap2_bmscan.nf`: take the contigs and the prokka annotation as staged `path` inputs and build the scan directory in the work directory. Previously they read `${params.output}/<id>/assembly` with no DAG edge to prokka, so LocusExtractor could run before its preferred prokka FASTA existed.
-- All three declare their results as process outputs and publish them; `cache = false` dropped from the `withName: 'bmgap2_.*'` selector, so a resume republishes them from `work/`.
-- `modules/pmga.nf`: second output named `emit: files`.
-- `bin/run_bmgap2_*.py`: explicit `--sample` / `--mlst` / `--outdir` / `--db` arguments; no reference to `params.output`. `run_bmgap2_amr.py` no longer writes a `json/` subdirectory into PMGA's published output.
-- `bin/bmgap2_helpers.py`: `read_scheme_and_sample()` replaced by `read_scheme()`, which takes the sample ID rather than deriving it from the output path.
-- `bin/run_bmgap2_bmscan.py`: BMScan's JSON renamed to `<sample>_species_analysis.json` so many samples can be staged into one `summary_report` task.
-- `modules/summary_report.nf`, `bin/summary_report.py`: BMGAP2 results arrive as staged inputs; `parse_bmgap2()` reads the work directory instead of `${params.output}/<id>`.
-
 ### Output
 - `modules/candidate_references.nf`: reference genomes no longer published; accession manifest published instead.
 - `modules/skani.nf`: publishes only `_skani.tsv`.
@@ -92,12 +82,19 @@ General Statistics reports raw and clean read metrics side by side.
 
 ### Maintenance
 - `bin/sanibel_taxonomy.py`: single home for the shared 16S/Kraken parsers, thresholds, accession regex and `genus_of`.
-- `bin/bmgap2_helpers.py` (new): shared boilerplate for the three `run_bmgap2_*.py` scripts.
 - `modules/kaptive.nf` (new): parameterized module replacing `kaptive_ab.nf` / `kaptive_vp.nf`.
 - `bin/summary_report.py`: collapsed the three duplicated standard-row blocks into one.
 - `bin/build_candidate_pool.py`: dropped the unused `sample_id` argument.
 - `sanibel.nf`: added a `rebind()` helper for the repeated re-key / join idiom.
-- `nextflow.config`: process-level `cpus` / `memory` defaults; `withName: 'bmgap2_.*'` selector; `bmgap2_*` set `cache = false`.
+- `nextflow.config`: process-level `cpus` / `memory` defaults.
+
+### Removed
+BMGAP2 is no longer integrated. CDC no longer maintains it and is developing BMGAP3, so its results risk falling behind or being wrong.
+
+- `bmgap2_amr`, `bmgap2_locusextractor` and `bmgap2_bmscan` modules, their `bin/run_bmgap2_*.py` scripts and `bin/bmgap2_helpers.py`.
+- `nm_sum_report.txt` and `hi_sum_report.txt`. PMGA still fills `serotype` in `sum_report.txt` for *N. meningitidis* and *H. influenzae*.
+- `params.bmgap2_db`, the `bmgap2_*` process settings, the PubMLST *H. influenzae* clonal-complex table download, `docs/bmgap2-reports.md` and `licenses/BMGAP2_LICENSE`.
+- `environment.yaml`. The host scripts in `bin/` need only python3, which `sanibel.sh` loads with `module load python3`.
 
 ---
 

@@ -33,9 +33,6 @@ include { build_candidates }      from './modules/build_candidates.nf'
 include { candidate_references }  from './modules/candidate_references.nf'
 include { skani }                 from './modules/skani.nf'
 include { resolve_ec_shigella }   from './modules/resolve_ec_shigella.nf'
-include { bmgap2_amr }            from './modules/bmgap2_amr.nf'
-include { bmgap2_locusextractor } from './modules/bmgap2_locusextractor.nf'
-include { bmgap2_bmscan }         from './modules/bmgap2_bmscan.nf'
 include { legsta }                from './modules/legsta.nf'
 include { kleborate }             from './modules/kleborate.nf'
 include { shigatyper }            from './modules/shigatyper.nf'
@@ -60,13 +57,6 @@ def inComplex(meta) {
     meta.species == 'Escherichia_coli' || meta.genus == 'Shigella'
 }
 
-def withAssembly(ch, asmCh, prokkaCh) {
-    ch.map  { meta, x -> [ meta.id, meta, x ] }
-      .join(asmCh)
-      .join(prokkaCh)
-      .map  { _id, meta, x, asm, annot -> [ meta, x, asm, annot ] }
-}
-
 workflow {
     log.info """
     Sanibel — Bacterial WGS Analysis Pipeline
@@ -74,7 +64,6 @@ workflow {
     version     : ${workflow.manifest.version}
     input dir   : ${params.input}
     output dir  : ${params.output}
-    bmgap2 db   : ${params.bmgap2_db}
     kraken db   : ${params.kraken_db}
     ==========================================================================
     """
@@ -91,20 +80,7 @@ workflow {
         [ meta, files ]
     }
 
-    // MLST CC reference tables
-    def mlstTablesDir = "${projectDir}/db/mlst_tables"
-    [
-        [ file("${mlstTablesDir}/hinfluenzae.txt"),
-          "https://raw.githubusercontent.com/tseemann/mlst/master/db/pubmlst/hinfluenzae/hinfluenzae.txt" ]
-    ].each { dst, src ->
-        if ( !dst.exists() ) {
-            log.info "Downloading ${dst.name} from PubMLST..."
-            dst.text = src.toURL().text
-        }
-    }
-
-    ch_hinfluenzae_txt = channel.value(file("${mlstTablesDir}/hinfluenzae.txt", checkIfExists: true))
-    ch_mlst_schemes    = channel.value(file("${projectDir}/assets/mlst_schemes.tsv", checkIfExists: true))
+    ch_mlst_schemes = channel.value(file("${projectDir}/assets/mlst_schemes.tsv", checkIfExists: true))
 
     kleborate_presets = file("${projectDir}/assets/kleborate_presets.tsv", checkIfExists: true)
         .readLines()
@@ -248,19 +224,12 @@ workflow {
     ch_prokka     = prokka(ch_assembly_typed)
     ch_mlst       = mlst(ch_assembly_typed, ch_mlst_schemes)
 
-    // PMGA + BMGAP2
+    // PMGA
     ch_pmga = pmga(
         ch_assembly_typed
             .filter { meta, _a -> meta.genus in ['Neisseria', 'Haemophilus'] }
             .join(ch_mlst.out, by: 0)
     )
-    ch_bmgap2_amr = bmgap2_amr(ch_mlst.out.join(ch_pmga.files, by: 0))
-
-    ch_asm_by_id    = ch_assembly_typed.map    { meta, a -> [ meta.id, a ] }
-    ch_prokka_by_id = ch_prokka.annotation.map { meta, d -> [ meta.id, d ] }
-
-    ch_bmgap2_le     = bmgap2_locusextractor(withAssembly(ch_bmgap2_amr.out, ch_asm_by_id, ch_prokka_by_id))
-    ch_bmgap2_bmscan = bmgap2_bmscan(withAssembly(ch_bmgap2_le.out, ch_asm_by_id, ch_prokka_by_id))
 
     // Species-specific analyses
     legsta(ch_assembly_typed.filter      { meta, _a -> meta.species == 'Legionella_pneumophila' })
@@ -298,14 +267,10 @@ workflow {
         ch_mlst.out.map             { _meta, mlst_file -> mlst_file }.collect().ifEmpty([]),
         ch_kraken_enriched.map      { _meta, kr   -> kr   }.collect().ifEmpty([]),
         ch_pmga.out.map             { _meta, pmga_file -> pmga_file }.collect().ifEmpty([]),
-        ch_hinfluenzae_txt,
         ch_skani.result.map         { _meta, f -> f }.collect().ifEmpty([]),
         ch_resolved.resolved.map    { _meta, f -> f }.collect().ifEmpty([]),
         ch_blast_16s.result.map     { _meta, f -> f }.collect().ifEmpty([]),
-        ch_amrfinder.out.map        { _meta, f -> f }.collect().ifEmpty([]),
-        ch_bmgap2_amr.amr.map       { _meta, f -> f }.collect().ifEmpty([]),
-        ch_bmgap2_le.le.map         { _meta, d -> d }.collect().ifEmpty([]),
-        ch_bmgap2_bmscan.bmscan.map { _meta, f -> f }.collect().ifEmpty([])
+        ch_amrfinder.out.map        { _meta, f -> f }.collect().ifEmpty([])
     )
 
     // Run-level interactive MultiQC across all samples

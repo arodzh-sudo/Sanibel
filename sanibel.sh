@@ -11,8 +11,7 @@
 #SBATCH --mail-user=your@email.gov
 #SBATCH --mail-type=FAIL,END
 
-module load conda apptainer nextflow
-conda activate SANIBEL
+module load apptainer nextflow python3
 
 # Path to container image cache directory
 export NXF_APPTAINER_CACHEDIR=/path/to/apptainer/cache

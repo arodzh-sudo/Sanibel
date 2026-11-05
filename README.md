@@ -19,16 +19,16 @@ Sanibel is Florida BPHL's Nextflow bacterial whole-genome sequencing (WGS) analy
 
 Species identification uses a candidate-pool design: Mash, Kraken2 and 16S rRNA BLAST nominate a ranked pool of candidate species, multiple RefSeq genomes are downloaded per candidate and skani confirms the species by whole-genome ANI. skani is the arbiter for the reported organism and the contamination flag. A confident call requires ANI ≥ 95% and alignment fraction ≥ 50% for a positive ID. *E. coli* and *Shigella* are the one exception: ANI cannot separate them, so ShigaTyper picks the genus and skani then names the species within it.
 
-Species-specific typing modules run automatically based on species identification results: *Legionella pneumophila* (Legsta), *Klebsiella* (Kleborate), *E. coli*/*Shigella* (SerotypeFinder and ShigaTyper, both), *Streptococcus pyogenes/dysgalactiae* (EMM typing), *Salmonella* (SeqSero2), *Streptococcus pneumoniae* (SeroBA), *Pseudomonas aeruginosa* (pasty), *Acinetobacter baumannii* (Kaptive), *Vibrio parahaemolyticus* (Kaptive), *Listeria monocytogenes* (LisSero) and *Neisseria meningitidis*/*Haemophilus influenzae* (PMGA). BMGAP2 provides enhanced AMR and antigen analysis for *Neisseria meningitidis* and *Haemophilus influenzae*. PlasmidFinder runs on all samples.
+Species-specific typing modules run automatically based on species identification results: *Legionella pneumophila* (Legsta), *Klebsiella* (Kleborate), *E. coli*/*Shigella* (SerotypeFinder and ShigaTyper, both), *Streptococcus pyogenes/dysgalactiae* (EMM typing), *Salmonella* (SeqSero2), *Streptococcus pneumoniae* (SeroBA), *Pseudomonas aeruginosa* (pasty), *Acinetobacter baumannii* (Kaptive), *Vibrio parahaemolyticus* (Kaptive), *Listeria monocytogenes* (LisSero) and *Neisseria meningitidis*/*Haemophilus influenzae* (PMGA). PlasmidFinder runs on all samples.
 
 ### ⚙️ Dependencies
 
 - **Nextflow** 23.04–26.x - [installation guide](https://github.com/nextflow-io/nextflow)
 - **Apptainer/Singularity** - [installation guide](https://apptainer.org/docs/user/latest/)
-- **Conda** - [installation guide](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html)
+- **Python** 3.10+ - [installation guide](https://docs.python.org/3/using/index.html)
 - **SLURM** workload manager (required for HiPerGator; otherwise not required)
 
-All bioinformatics tools run inside containers, no additional software installation is required.
+All bioinformatics tools run inside containers. The scripts in `bin/` run with python3.
 
 ### 💻 Resource Requirements
 
@@ -51,11 +51,13 @@ $ git clone https://github.com/BPHL-Molecular/Sanibel
 $ cd Sanibel/
 ```
 
-#### 2. Create the conda environment
+#### 2. Python
+
+HiPerGator users can skip this step: `sanibel.sh` loads Python with `module load python3`. Everyone else needs `python3` on the PATH when Nextflow runs, for example from a conda environment:
 
 ```bash
-$ conda env create -f environment.yaml
-$ conda activate SANIBEL
+$ conda create -n sanibel -c conda-forge python=3.10
+$ conda activate sanibel
 ```
 
 #### 3. Configure params.yaml
@@ -67,15 +69,13 @@ Edit `params.yaml` and set paths for your environment:
 input:  "/full/path/to/fastqs"
 output: "/full/path/to/output"
 
-# non-Florida-BPHL users: uncomment and set your BMGAP2 analysis_scripts directory
-#bmgap2_db:  "/full/path/to/bmgap2/analysis_scripts"
-
 # non-Florida-BPHL users: uncomment and set your Kraken2 database directory
 #kraken_db:  "/full/path/to/kraken2/database"
 ```
 
-> **Florida BPHL users:** only `input` and `output` need to be set. All other paths are pre-configured.
-> **Non-Florida BPHL users:** uncomment `bmgap2_db` and `kraken_db` by removing the leading `#` and set their paths.
+> **Florida BPHL users:** only `input` and `output` need to be set.
+
+> **Non-Florida BPHL users:** uncomment `kraken_db` by removing the leading `#` and set its path.
 
 #### 4. Configure sanibel.sh
 
@@ -86,18 +86,13 @@ Add your email address for job notifications and set `NXF_APPTAINER_CACHEDIR` to
 ```bash
 #SBATCH --mail-user=your@email.gov
 export NXF_APPTAINER_CACHEDIR=/path/to/apptainer/cache
-
 ```
 
-#### 5. Kraken2 and BMGAP2 Setup for Non-Florida-BPHL Users
+#### 5. Kraken2 Setup for Non-Florida-BPHL Users
 
-> **Florida BPHL users:** Kraken2 and BMGAP2 are already installed and configured on the cluster. The `kraken_db` and `bmgap2_db` paths in `params.yaml` are pre-set. Skip this section entirely.
+> **Florida BPHL users:** The `kraken_db` path in `params.yaml` is pre-set. Skip this section entirely.
 
-For non-Florida BPHL users, a Kraken2 database must be downloaded before running the pipeline. These are available [here](https://benlangmead.github.io/aws-indexes/k2). Once downloaded, set the location path in the `params.yaml` file.
-
-[BMGAP2](https://github.com/CDCgov/BMGAP2) (*Bacterial Meningitis Genome Analysis Pipeline 2*) runs automatically on *Neisseria meningitidis* and *Haemophilus influenzae* samples. The custom python scripts check the MLST scheme internally and skip any sample that is not *N. meningitidis* or *H. influenzae*.
-
-For non-Florida BPHL users, BMGAP2 must be installed before running the pipeline. Its scripts run directly on the host (not inside a container) and are invoked by the three `bmgap2_*` Nextflow modules. Follow the [BMGAP2 installation instructions](https://github.com/CDCgov/BMGAP2) to clone the repository and build all required databases, then set `bmgap2_db` in `params.yaml` to the `analysis_scripts` directory.
+For non-Florida BPHL users, a Kraken2 database must be downloaded before running the pipeline. These are available [here](https://benlangmead.github.io/aws-indexes/k2). Once downloaded, set the location path in the `params.yaml` file. We suggest using the Standard-8 for balanced sensititivy/accuracy and speed.
 
 ### How to Run
 
@@ -131,7 +126,7 @@ flowchart LR
     TYP --> REP
     AMR --> REP
 
-    REP --> OUT["sum_report.txt<br/>amr_report.txt<br/>nm_sum_report.txt<br/>hi_sum_report.txt"]
+    REP --> OUT["sum_report.txt<br/>amr_report.txt"]
     REP --> MQ["multiqc_global<br/>sanibel_report.html"]
 
     style SID fill:#9f9,stroke:#333,color:#000
@@ -154,7 +149,7 @@ Sanibel is made possible thanks to the following tools:
 
 **Typing & Classification** - [Mash](https://github.com/marbl/Mash) · [Kraken2](https://github.com/DerrickWood/kraken2) · [BLAST](https://blast.ncbi.nlm.nih.gov) · [NCBI Datasets](https://github.com/ncbi/datasets) · [skani](https://github.com/bluenote-1577/skani) · [MLST](https://github.com/tseemann/mlst)
 
-**Species-Specific Serotyping** - [Legsta](https://github.com/MDU-PHL/legsta) · [Kleborate](https://github.com/klebgenomics/Kleborate) · [ShigaTyper](https://github.com/CFSAN-Biostatistics/shigatyper) · [emm-typing-tool](https://github.com/ukhsa-collaboration/emm-typing-tool) · [SeqSero2](https://github.com/denglab/SeqSero2) · [SerotypeFinder](https://bitbucket.org/genomicepidemiology/serotypefinder) · [PMGA](https://github.com/CDCgov/PMGA) · [BMGAP2](https://github.com/CDCgov/BMGAP2) · [SeroBA](https://github.com/sanger-pathogens/seroba) · [pasty](https://github.com/rpetit3/pasty) · [Kaptive](https://github.com/klebgenomics/Kaptive) · [LisSero](https://github.com/MDU-PHL/LisSero)
+**Species-Specific Serotyping** - [Legsta](https://github.com/MDU-PHL/legsta) · [Kleborate](https://github.com/klebgenomics/Kleborate) · [ShigaTyper](https://github.com/CFSAN-Biostatistics/shigatyper) · [emm-typing-tool](https://github.com/ukhsa-collaboration/emm-typing-tool) · [SeqSero2](https://github.com/denglab/SeqSero2) · [SerotypeFinder](https://bitbucket.org/genomicepidemiology/serotypefinder) · [PMGA](https://github.com/CDCgov/PMGA) · [SeroBA](https://github.com/sanger-pathogens/seroba) · [pasty](https://github.com/rpetit3/pasty) · [Kaptive](https://github.com/klebgenomics/Kaptive) · [LisSero](https://github.com/MDU-PHL/LisSero)
 
 **AMR & Mobile Genetic Elements** - [AMRFinderPlus](https://github.com/ncbi/amr) · [PlasmidFinder](https://bitbucket.org/genomicepidemiology/plasmidfinder)
 
@@ -162,32 +157,21 @@ Sanibel is made possible thanks to the following tools:
 
 ### 📁 Output
 
-All results are written to `params.output/<sample_id>/`. Depending on which species are in the run, up to four summary files are written to `params.output/`:
+All results are written to `params.output/<sample_id>/`. Two summary files are written to `params.output/`:
 
 | File | Samples | Cols | Key fields |
 |------|---------|------|------------|
 | `sum_report.txt` | All | 29 | ID · species (skani ANI, Mash, Kraken) · 16S top hit · skani ANI/reference · species-ID QC · contamination flag · MLST scheme/ST · serotype · QC metrics (reads, coverage, assembly stats, GC, CDS) · assembly QC |
 | `amr_report.txt` | All | 5 | ID · carbapenemase family · matched target genes · AMR genes · AMR subclasses |
-| `nm_sum_report.txt` | *N. meningitidis* only | 32 | ID · PMGA capsule genogroup · BMGAP2 AMR alleles/phenotypes · vaccine antigens detected · BMGAP2 status |
-| `hi_sum_report.txt` | *H. influenzae* only | 27 | ID · PMGA capsule genotype · BMGAP2 AMR alleles/phenotypes · BMGAP2 status |
 
-Every submitted sample has a `sum_report.txt` row. A sample that did not assemble has `FAIL: no assembly` in `assembly_qc` and `No data` in every other column.
+Report values use a fixed vocabulary. A value is never blank, and only one of these means the answer is negative:
 
-Report cells use a fixed vocabulary. A cell is never blank, and only one of these means the answer is negative:
-
-| Cell | Meaning |
+| Value | Meaning |
 |------|---------|
-| `No data` | the tool did not run, or its output was missing or unreadable |
+| `No data` | the tool did not run, or its output was missing or unreadable, is not a negative result |
 | `Not detected` | the tool ran and the locus is absent from the assembly |
-| `Present (allele unresolved)` | the locus is in the genome but the allele lookup did not resolve |
-| `Disrupted ORF` | the gene is present but not intact |
-| `New allele` | present, with no match in the reference database |
 
-`No data` is not a negative result.
-
-For what the *N. meningitidis* and *H. influenzae* columns mean, how the `bmgap2_status` column is read and where BMGAP2 can fail without reporting an error, see [docs/bmgap2-reports.md](docs/bmgap2-reports.md).
-
-`params.output/pipeline_info/` holds the Nextflow run record: `trace.txt`, `execution_report.html` and `timeline.html`. A task that failed under `errorStrategy = 'ignore'` shows as `IGNORED` in the `status` column of `trace.txt`, and the run summary reports how many submitted samples reached `sum_report.txt` and how many did not assemble.
+`params.output/pipeline_info/` holds the Nextflow run record: `trace.txt`, `execution_report.html` and `timeline.html`.
 
 ### 🤝 Contributing
 We welcome contributions to make Sanibel better! Feel free to open issues or submit pull requests to suggest any additional features or enhancements!
@@ -197,5 +181,3 @@ We welcome contributions to make Sanibel better! Feel free to open issues or sub
 
 ### ⚖️ License
 Sanibel is licensed under the [Apache License](https://github.com/BPHL-Molecular/Sanibel/blob/main/LICENSE).
-
-[BMGAP2](https://github.com/CDCgov/BMGAP2) is developed by the CDC and is also distributed under the Apache License 2.0. A copy is included in [`licenses/BMGAP2_LICENSE`](licenses/BMGAP2_LICENSE).

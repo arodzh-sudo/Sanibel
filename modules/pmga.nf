@@ -6,7 +6,7 @@ process pmga {
         tuple val(meta), path(assembly), path(mlst_out)
     output:
         tuple val(meta), path("${meta.id}sta.txt"), emit: out
-        tuple val(meta), path("${meta.id}sta*"),    emit: files
+        path("${meta.id}sta*")
 
     script:
     def prefix = meta.id

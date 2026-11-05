@@ -11,19 +11,13 @@ process summary_report {
         path mlst_files
         path kraken_reports
         path pmga_files
-        path hinfluenzae_txt
         path skani_files
         path resolved_species_files
         path blast16s_files
         path amrfinder_files
-        path bmgap2_amr_files
-        path bmgap2_le_dirs
-        path bmgap2_bmscan_files
 
     output:
         path "sum_report.txt",    emit: summary
-        path "nm_sum_report.txt", emit: nm_summary, optional: true
-        path "hi_sum_report.txt", emit: hi_summary, optional: true
         path "amr_report.txt",    emit: amr,        optional: true
         path "*_mqc.tsv",         emit: mqc_tables, optional: true
 
@@ -32,7 +26,6 @@ process summary_report {
     """
     summary_report.py \
         --outdir   "${outdir}" \
-        --hinfluenzae_txt ${hinfluenzae_txt} \
         --samples  ${sample_ids.join(' ')}
     """
 }
